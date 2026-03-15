@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <Appenders>
+        <!-- Console Appender for all logs -->
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+        </Console>
+
+        <!-- JSON File Appender ONLY for database operations -->
+        <RollingFile name="DatabaseOpsJsonFile"
+                     fileName="inventory-service/logs/database-operations.json"
+                     filePattern="inventory-service/logs/database-operations-%d{yyyy-MM-dd}-%i.json.gz">
+            <JsonTemplateLayout eventTemplateUri="classpath:EcsLayout.json"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy/>
+                <SizeBasedTriggeringPolicy size="10MB"/>
+            </Policies>
+        </RollingFile>
+    </Appenders>
+
+    <Loggers>
+        <!-- Separate logger ONLY for database operations -->
+        <Logger name="DB_OPERATIONS" level="INFO" additivity="false">
+            <AppenderRef ref="DatabaseOpsJsonFile"/>
+        </Logger>
+
+        <!-- Regular application logs go to console only -->
+        <Logger name="com.example.inventory_service" level="INFO" additivity="false">
+            <AppenderRef ref="Console"/>
+        </Logger>
+
+        <!-- Root logger for everything else -->
+        <Root level="INFO">
+            <AppenderRef ref="Console"/>
+        </Root>
+    </Loggers>
+</Configuration>

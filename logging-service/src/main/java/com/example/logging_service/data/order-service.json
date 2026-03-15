@@ -1,0 +1,25 @@
+{
+  "logs" : [ {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "CreateOrder",
+    "timestamp" : 1.7633842941349273E9,
+    "data" : {
+      "clientid" : 1,
+      "amount" : 170,
+      "items" : [ {
+        "id" : 1,
+        "quantity" : 1
+      }, {
+        "id" : 2,
+        "quantity" : 1
+      } ]
+    }
+  }, {
+    "correlationid" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "FinalizeOrder",
+    "timestamp" : 1.7633842951984334E9,
+    "data" : {
+      "order_id" : 89
+    }
+  } ]
+}

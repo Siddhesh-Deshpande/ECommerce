@@ -1,0 +1,100 @@
+{
+  "logs" : [ {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "CreateOrder",
+    "timestamp" : 1.7633842941349273E9,
+    "data" : {
+      "clientid" : 1,
+      "amount" : 170,
+      "items" : [ {
+        "id" : 1,
+        "quantity" : 1
+      }, {
+        "id" : 2,
+        "quantity" : 1
+      } ]
+    }
+  }, {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "ReserveItems",
+    "timestamp" : 1.7633842941349473E9,
+    "data" : {
+      "items" : [ {
+        "id" : 1,
+        "quantity" : 1
+      }, {
+        "id" : 2,
+        "quantity" : 1
+      } ]
+    }
+  }, {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "ReservePayment",
+    "timestamp" : 1.7633842941349583E9,
+    "data" : {
+      "clientid" : 1,
+      "amount" : 170
+    }
+  }, {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "OrderResponse",
+    "timestamp" : 1.763384294354616E9,
+    "data" : {
+      "status" : true,
+      "id" : 89
+    }
+  }, {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "InventoryResponse",
+    "timestamp" : 1.7633842945002797E9,
+    "data" : {
+      "status" : true
+    }
+  }, {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "PaymentResponse",
+    "timestamp" : 1.763384294659105E9,
+    "data" : {
+      "status" : true
+    }
+  }, {
+    "correlationid" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "FinalizeOrder",
+    "timestamp" : 1.7633842951984334E9,
+    "data" : {
+      "order_id" : 89
+    }
+  }, {
+    "correlationid" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "DeductItems",
+    "timestamp" : 1.763384295201405E9,
+    "data" : { }
+  }, {
+    "correlationid" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "ChargeMoney",
+    "timestamp" : 1.7633842952036164E9,
+    "data" : { }
+  }, {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "OrderResponse",
+    "timestamp" : 1.7633842952561963E9,
+    "data" : {
+      "status" : true,
+      "id" : 89
+    }
+  }, {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "InventoryResponse",
+    "timestamp" : 1.7633842954451075E9,
+    "data" : {
+      "status" : true
+    }
+  }, {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "PaymentResponse",
+    "timestamp" : 1.7633842956526575E9,
+    "data" : {
+      "status" : true
+    }
+  } ]
+}

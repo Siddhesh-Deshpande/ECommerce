@@ -1,0 +1,1 @@
+{"@timestamp":"2025-11-17T12:58:15.646Z","ecs.version":"1.2.0","log.level":"INFO","message":"correlationId: cf83e849-65ff-4021-a0c7-f1f3f5ccb824, eventType: ChargeMoney,timestamp: 2025-11-17T12:58:15.646562678Z, id:1,balance:93880","process.thread.name":"scheduling-1","log.logger":"DB_OPERATIONS"}

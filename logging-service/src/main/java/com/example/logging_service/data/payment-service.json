@@ -1,0 +1,16 @@
+{
+  "logs" : [ {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "ReservePayment",
+    "timestamp" : 1.7633842941349583E9,
+    "data" : {
+      "clientid" : 1,
+      "amount" : 170
+    }
+  }, {
+    "correlationid" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "ChargeMoney",
+    "timestamp" : 1.7633842952036164E9,
+    "data" : { }
+  } ]
+}

@@ -1,0 +1,21 @@
+{
+  "logs" : [ {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "ReserveItems",
+    "timestamp" : 1.7633842941349473E9,
+    "data" : {
+      "items" : [ {
+        "id" : 1,
+        "quantity" : 1
+      }, {
+        "id" : 2,
+        "quantity" : 1
+      } ]
+    }
+  }, {
+    "correlationid" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "DeductItems",
+    "timestamp" : 1.763384295201405E9,
+    "data" : { }
+  } ]
+}

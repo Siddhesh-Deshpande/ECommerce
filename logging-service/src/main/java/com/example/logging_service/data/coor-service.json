@@ -1,0 +1,47 @@
+{
+  "logs" : [ {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "OrderResponse",
+    "timestamp" : 1.763384294354616E9,
+    "data" : {
+      "status" : true,
+      "id" : 89
+    }
+  }, {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "InventoryResponse",
+    "timestamp" : 1.7633842945002797E9,
+    "data" : {
+      "status" : true
+    }
+  }, {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "PaymentResponse",
+    "timestamp" : 1.763384294659105E9,
+    "data" : {
+      "status" : true
+    }
+  }, {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "OrderResponse",
+    "timestamp" : 1.7633842952561963E9,
+    "data" : {
+      "status" : true,
+      "id" : 89
+    }
+  }, {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "InventoryResponse",
+    "timestamp" : 1.7633842954451075E9,
+    "data" : {
+      "status" : true
+    }
+  }, {
+    "correlationId" : "cf83e849-65ff-4021-a0c7-f1f3f5ccb824",
+    "eventype" : "PaymentResponse",
+    "timestamp" : 1.7633842956526575E9,
+    "data" : {
+      "status" : true
+    }
+  } ]
+}
