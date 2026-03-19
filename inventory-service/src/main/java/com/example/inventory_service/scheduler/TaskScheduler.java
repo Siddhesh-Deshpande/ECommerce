@@ -1,3 +1,133 @@
+//package com.example.inventory_service.scheduler;
+//
+//import com.example.events.dtos.InventoryResponse;
+//import com.example.events.dtos.ReserveItems;
+//import com.example.inventory_service.entity.Item;
+//import com.example.inventory_service.entity.ReservedItems;
+//import com.example.inventory_service.repository.ItemRepository;
+//import com.example.inventory_service.repository.ReserveItemRepository;
+//import com.google.common.cache.Cache;
+//import org.slf4j.Logger;
+//import org.slf4j.LoggerFactory;
+//import org.springframework.beans.factory.annotation.Autowired;
+//import org.springframework.kafka.core.KafkaTemplate;
+//import org.springframework.scheduling.annotation.Scheduled;
+//import org.springframework.stereotype.Component;
+//
+//import java.time.Instant;
+//import java.util.Arrays;
+//import java.util.HashSet;
+//
+//@Component("inventoryTaskScheduler")
+//public class TaskScheduler {
+//    @Autowired
+//    private Cache<String, ReserveItems> guavaCache;
+//    @Autowired
+//    private ItemRepository itemRepository;
+//    @Autowired
+//    private ReserveItemRepository reserveItemRepository;
+//    @Autowired
+//    private KafkaTemplate<String, InventoryResponse> kafkaTemplate;
+//
+//    private static final Logger logger = LoggerFactory.getLogger("DB_OPERATIONS");
+//
+//
+//    @Scheduled(fixedDelay = 1000)//decide what time to keep in future
+//    public void ReserveItems()
+//    {
+//
+//        HashSet<String> keys = new HashSet<>();
+//        for (String key : guavaCache.asMap().keySet())
+//        {
+//            ReserveItems task =  guavaCache.asMap().get(key);
+//            Integer[] item_ids = task.getItemIds();
+//            Integer[] quantity = task.getQuantity();
+//            if(task.getStatus()==0) // perform reservation
+//            {
+//                boolean flag = true;
+//                for(int i = 0; i<quantity.length; i++)
+//                {
+//                    Item item = itemRepository.findById(item_ids[i]).orElse(null);
+//                    ReservedItems reserveItems = reserveItemRepository.findById(item_ids[i]).orElse(null);
+//                    int q = (reserveItems==null  ? 0:reserveItems.getReserved_quantity());
+//                    if(item!=null &&  item.getQuantity()-q<quantity[i])
+//                    {
+//                        flag=false;
+//                        keys.add(key);
+//                        break;
+//                    }
+//                }
+//                if(flag)
+//                {
+//                    for(int i = 0; i<quantity.length; i++)
+//                    {
+//                        ReservedItems reserveItems = reserveItemRepository.findById(item_ids[i]).orElse(null);
+//                        if(reserveItems!=null)
+//                        {
+//                            reserveItems.setReserved_quantity(quantity[i]+reserveItems.getReserved_quantity());
+//                            reserveItemRepository.save(reserveItems);
+//                        }
+//                        else
+//                        {
+//                            ReservedItems reservedItems = new  ReservedItems(item_ids[i],quantity[i]);
+//                            reserveItemRepository.save(reservedItems);
+//                        }
+//                    }
+//                    kafkaTemplate.send("coor-service",new InventoryResponse(key,true));
+//                    task.setStatus(2);//this means reservatino done
+//                }
+//                else
+//                {
+//                    kafkaTemplate.send("coor-service",new InventoryResponse(key,false));
+//                }
+//
+//            }
+//        }
+//        for(String key : keys)
+//        {
+//            guavaCache.invalidate(key);
+//        }
+//    }
+//    @Scheduled(fixedDelay = 1000)
+//    public void DeductItems()
+//    {
+//        HashSet<String> keys = new HashSet<>();
+//        for(String key : guavaCache.asMap().keySet())
+//        {
+//            ReserveItems task = guavaCache.asMap().get(key);
+//            Integer[] item_ids = task.getItemIds();
+//            Integer[] quantity = task.getQuantity();
+//            if (task.getStatus() == 1)
+//            {
+//                for(int i = 0; i<quantity.length; i++)
+//                {
+//                    Item item =  itemRepository.findById(item_ids[i]).orElse(null);
+//                    ReservedItems reserveItems = reserveItemRepository.findById(item_ids[i]).orElse(null);
+//                    item.setQuantity(item.getQuantity()-quantity[i]);
+//                    reserveItems.setReserved_quantity(reserveItems.getReserved_quantity()-quantity[i]);
+//                    reserveItemRepository.save(reserveItems);
+//                    itemRepository.save(item);
+//                    logger.info("correlationId: {}, eventType: {},timestamp:{}, id: {}, itemname: {}, quantity: {}, price: {}",
+//                            key,
+//                            "DeductItems",
+//                            Instant.now(),
+//                            item.getId(),
+//                            item.getItemName(),
+//                            item.getQuantity(),
+//                            item.getPrice());
+//                }
+//                kafkaTemplate.send("coor-service",new InventoryResponse(key,true));
+//                keys.add(key);
+//                task.setStatus(3);
+//            }
+//        }
+//        for(String key : keys)
+//        {
+//            guavaCache.invalidate(key);
+//        }
+//    }
+//
+//}
 package com.example.inventory_service.scheduler;
 
 import com.example.events.dtos.InventoryResponse;
@@ -7,6 +137,8 @@ import com.example.inventory_service.entity.ReservedItems;
 import com.example.inventory_service.repository.ItemRepository;
 import com.example.inventory_service.repository.ReserveItemRepository;
 import com.google.common.cache.Cache;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,7 +147,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.HashSet;
 
 @Component("inventoryTaskScheduler")
@@ -28,103 +159,98 @@ public class TaskScheduler {
     private ReserveItemRepository reserveItemRepository;
     @Autowired
     private KafkaTemplate<String, InventoryResponse> kafkaTemplate;
+    @Autowired
+    private Tracer tracer;
 
     private static final Logger logger = LoggerFactory.getLogger("DB_OPERATIONS");
 
-
-    @Scheduled(fixedDelay = 1000)//decide what time to keep in future
-    public void ReserveItems()
-    {
-
-        HashSet<String> keys = new HashSet<>();
-        for (String key : guavaCache.asMap().keySet())
-        {
-            ReserveItems task =  guavaCache.asMap().get(key);
-            Integer[] item_ids = task.getItemIds();
-            Integer[] quantity = task.getQuantity();
-            if(task.getStatus()==0) // perform reservation
-            {
-                boolean flag = true;
-                for(int i = 0; i<quantity.length; i++)
-                {
-                    Item item = itemRepository.findById(item_ids[i]).orElse(null);
-                    ReservedItems reserveItems = reserveItemRepository.findById(item_ids[i]).orElse(null);
-                    int q = (reserveItems==null  ? 0:reserveItems.getReserved_quantity());
-                    if(item!=null &&  item.getQuantity()-q<quantity[i])
-                    {
-                        flag=false;
-                        keys.add(key);
-                        break;
-                    }
-                }
-                if(flag)
-                {
-                    for(int i = 0; i<quantity.length; i++)
-                    {
-                        ReservedItems reserveItems = reserveItemRepository.findById(item_ids[i]).orElse(null);
-                        if(reserveItems!=null)
-                        {
-                            reserveItems.setReserved_quantity(quantity[i]+reserveItems.getReserved_quantity());
-                            reserveItemRepository.save(reserveItems);
-                        }
-                        else
-                        {
-                            ReservedItems reservedItems = new  ReservedItems(item_ids[i],quantity[i]);
-                            reserveItemRepository.save(reservedItems);
-                        }
-                    }
-                    kafkaTemplate.send("coor-service",new InventoryResponse(key,true));
-                    task.setStatus(2);//this means reservatino done
-                }
-                else
-                {
-                    kafkaTemplate.send("coor-service",new InventoryResponse(key,false));
-                }
-
-            }
-        }
-        for(String key : keys)
-        {
-            guavaCache.invalidate(key);
-        }
-    }
     @Scheduled(fixedDelay = 1000)
-    public void DeductItems()
-    {
+    public void ReserveItems() {
         HashSet<String> keys = new HashSet<>();
-        for(String key : guavaCache.asMap().keySet())
-        {
+        for (String key : guavaCache.asMap().keySet()) {
             ReserveItems task = guavaCache.asMap().get(key);
-            Integer[] item_ids = task.getItemIds();
-            Integer[] quantity = task.getQuantity();
-            if (task.getStatus() == 1)
-            {
-                for(int i = 0; i<quantity.length; i++)
-                {
-                    Item item =  itemRepository.findById(item_ids[i]).orElse(null);
-                    ReservedItems reserveItems = reserveItemRepository.findById(item_ids[i]).orElse(null);
-                    item.setQuantity(item.getQuantity()-quantity[i]);
-                    reserveItems.setReserved_quantity(reserveItems.getReserved_quantity()-quantity[i]);
-                    reserveItemRepository.save(reserveItems);
-                    itemRepository.save(item);
-                    logger.info("correlationId: {}, eventType: {},timestamp:{}, id: {}, itemname: {}, quantity: {}, price: {}",
-                            key,
-                            "DeductItems",
-                            Instant.now(),
-                            item.getId(),
-                            item.getItemName(),
-                            item.getQuantity(),
-                            item.getPrice());
+
+            if(task.getStatus() == 0) {
+                // START SPAN FOR PREPARE/RESERVATION WORK
+                Span span = this.tracer.nextSpan().name("2pc-local-reserve");
+                try (Tracer.SpanInScope ws = this.tracer.withSpan(span.start())) {
+                    span.tag("correlationId", key);
+
+                    Integer[] item_ids = task.getItemIds();
+                    Integer[] quantity = task.getQuantity();
+                    boolean flag = true;
+
+                    // Logic for checking stock...
+                    for(int i = 0; i < quantity.length; i++) {
+                        Item item = itemRepository.findById(item_ids[i]).orElse(null);
+                        ReservedItems reserveItems = reserveItemRepository.findById(item_ids[i]).orElse(null);
+                        int q = (reserveItems == null ? 0 : reserveItems.getReserved_quantity());
+                        if(item != null && item.getQuantity() - q < quantity[i]) {
+                            flag = false;
+                            keys.add(key);
+                            break;
+                        }
+                    }
+
+                    if(flag) {
+                        for(int i = 0; i < quantity.length; i++) {
+                            ReservedItems reserveItems = reserveItemRepository.findById(item_ids[i]).orElse(null);
+                            if(reserveItems != null) {
+                                reserveItems.setReserved_quantity(quantity[i] + reserveItems.getReserved_quantity());
+                                reserveItemRepository.save(reserveItems);
+                            } else {
+                                ReservedItems reservedItems = new ReservedItems(item_ids[i], quantity[i]);
+                                reserveItemRepository.save(reservedItems);
+                            }
+                        }
+                        kafkaTemplate.send("coor-service", new InventoryResponse(key, true));
+                        task.setStatus(2);
+                    } else {
+                        kafkaTemplate.send("coor-service", new InventoryResponse(key, false));
+                    }
+                } finally {
+                    span.end();
                 }
-                kafkaTemplate.send("coor-service",new InventoryResponse(key,true));
-                keys.add(key);
-                task.setStatus(3);
             }
         }
-        for(String key : keys)
-        {
-            guavaCache.invalidate(key);
-        }
+        for(String key : keys) { guavaCache.invalidate(key); }
     }
 
+    @Scheduled(fixedDelay = 1000)
+    public void DeductItems() {
+        HashSet<String> keys = new HashSet<>();
+        for(String key : guavaCache.asMap().keySet()) {
+            ReserveItems task = guavaCache.asMap().get(key);
+            if (task.getStatus() == 1) {
+                // START SPAN FOR COMMIT/DEDUCTION WORK
+                Span span = this.tracer.nextSpan().name("2pc-local-deduct");
+                try (Tracer.SpanInScope ws = this.tracer.withSpan(span.start())) {
+                    span.tag("correlationId", key);
+
+                    Integer[] item_ids = task.getItemIds();
+                    Integer[] quantity = task.getQuantity();
+
+                    for(int i = 0; i < quantity.length; i++) {
+                        Item item = itemRepository.findById(item_ids[i]).orElse(null);
+                        ReservedItems reserveItems = reserveItemRepository.findById(item_ids[i]).orElse(null);
+
+                        item.setQuantity(item.getQuantity() - quantity[i]);
+                        reserveItems.setReserved_quantity(reserveItems.getReserved_quantity() - quantity[i]);
+
+                        reserveItemRepository.save(reserveItems);
+                        itemRepository.save(item);
+
+                        logger.info("correlationId: {}, eventType: {}, id: {}, itemname: {}, quantity: {}",
+                                key, "DeductItems", item.getId(), item.getItemName(), item.getQuantity());
+                    }
+                    kafkaTemplate.send("coor-service", new InventoryResponse(key, true));
+                    keys.add(key);
+                    task.setStatus(3);
+                } finally {
+                    span.end();
+                }
+            }
+        }
+        for(String key : keys) { guavaCache.invalidate(key); }
+    }
 }

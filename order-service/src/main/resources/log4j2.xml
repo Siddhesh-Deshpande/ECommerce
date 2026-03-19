@@ -3,7 +3,7 @@
     <Appenders>
         <!-- Console Appender for all logs -->
         <Console name="Console" target="SYSTEM_OUT">
-            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} [%X{traceId}, %X{spanId}] - %msg%n"/>
         </Console>
 
         <!-- JSON File Appender ONLY for database operations -->
