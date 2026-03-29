@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-initdb
+  namespace: ecomm
+data:
+  init.sql: |
+    -- =========================
+    -- CREATE DATABASES
+    -- =========================
+    CREATE DATABASE payment_db;
+    CREATE DATABASE order_db;
+    CREATE DATABASE inventory_db;
+    CREATE DATABASE user_db;
+
+    -- =========================
+    -- PAYMENT DB
+    -- =========================
+    \c payment_db;
+
+    CREATE TABLE users (
+                           user_id INT PRIMARY KEY,
+                           balance INT
+    );
+
+    CREATE TABLE reserve_payments (
+                                      user_id INT PRIMARY KEY,
+                                      amount INT
+    );
+
+    -- Insert users data (given + some random)
+    INSERT INTO users (user_id, balance) VALUES
+                                             (1, 89110),
+                                             (2, 160),
+                                             (3, 160),
+                                             (4, 200),
+                                             (5, 100),
+                                             (6, 50),
+                                             (7, 20),
+                                             (8, 10),
+                                             (9, 250),
+                                             (10, 150),
+                                             (11, 500),
+                                             (12, 75);
+
+    -- =========================
+    -- ORDER DB
+    -- =========================
+    \c order_db;
+
+    CREATE TABLE orders (
+                            orderid BIGSERIAL PRIMARY KEY,
+                            clientid INT,
+                            itemsids INT[],
+                            quantity INT[],
+                            amount INT,
+                            status VARCHAR(50)
+    );
+
+    -- =========================
+    -- INVENTORY DB
+    -- =========================
+    \c inventory_db;
+
+    CREATE TABLE items (
+                           item_id INT PRIMARY KEY,
+                           name VARCHAR(100),
+                           quantity INT,
+                           price INT
+    );
+
+    CREATE TABLE reserved_items (
+                                    item_id INT PRIMARY KEY,
+                                    reserved_quantity INT
+    );
+
+    -- Insert items data (given + some extra)
+    INSERT INTO items (item_id, name, quantity, price) VALUES
+                                                           (1, 'laptop', 70, 90),
+                                                           (2, 'phone', 37, 80),
+                                                           (3, 'headphones', 100, 70),
+                                                           (4, 'keyboard', 100, 60),
+                                                           (5, 'mouse', 100, 50),
+                                                           (6, 'monitor', 100, 40),
+                                                           (7, 'printer', 100, 30),
+                                                           (8, 'cable', 100, 20),
+                                                           (9, 'drive', 100, 10),
+                                                           (10, 'webcam', 100, 90),
+                                                           (11, 'tablet', 60, 120),
+                                                           (12, 'speaker', 80, 55);
+
+    -- Reserved items table (no insert as requested)
