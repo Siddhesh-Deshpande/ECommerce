@@ -1,0 +1,71 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: coordinator-scaler
+  namespace: ecomm
+spec:
+  scaleTargetRef:
+    name: coordinator-deployment
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus-service.ecomm.svc.cluster.local:9090
+        metricName: http_server_requests_seconds_count_rate
+        query: sum(rate(http_server_requests_seconds_count{application="coordinator"}[1m]))
+        threshold: "10" # Scale up if coordinator receives > 10 RPS
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: order-service-scaler
+  namespace: ecomm
+spec:
+  scaleTargetRef:
+    name: order-deployment
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-service.ecomm.svc.cluster.local:9092
+        consumerGroup: order-service-group
+        topic: order-service
+        lagThreshold: "10" # Scale up if lag exceeds 10 messages
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: payment-service-scaler
+  namespace: ecomm
+spec:
+  scaleTargetRef:
+    name: payment-deployment
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-service.ecomm.svc.cluster.local:9092
+        consumerGroup: payment-service-group
+        topic: payment-service
+        lagThreshold: "10"
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: inventory-service-scaler
+  namespace: ecomm
+spec:
+  scaleTargetRef:
+    name: inventory-deployment
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka-service.ecomm.svc.cluster.local:9092
+        consumerGroup: inventory-service-group
+        topic: inventory-service
+        lagThreshold: "10"
