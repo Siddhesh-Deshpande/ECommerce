@@ -17,7 +17,7 @@ spec:
       containers:
         - name: inventory
           image: siddhesh1712/inventory:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 8082
           env:

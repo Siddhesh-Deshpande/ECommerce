@@ -18,7 +18,7 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - name: broker
+    - name: client
       port: 2181
       targetPort: 2181
   selector:
@@ -50,10 +50,45 @@ spec:
               value: "2000"
             - name: ZOOKEEPER_SYNC_LIMIT
               value: "5"
+            - name: ZOOKEEPER_INIT_LIMIT
+              value: "10"
             - name: ZOOKEEPER_SERVER_ID
               value: "1"
+            - name: ZOOKEEPER_DATA_DIR
+              value: "/var/lib/zookeeper/data"
+            - name: ZOOKEEPER_DATA_LOG_DIR
+              value: "/var/lib/zookeeper/data/log"
+            - name: ZOOKEEPER_4LW_COMMANDS_WHITELIST
+              value: "ruok,srvr,stat,mntr"
+            - name: KAFKA_OPTS
+              value: "-Dzookeeper.4lw.commands.whitelist=ruok,srvr,stat,mntr"
           ports:
             - containerPort: 2181
+              name: client
+            - containerPort: 2888
+              name: server
+            - containerPort: 3888
+              name: leader-election
+          readinessProbe:
+            tcpSocket:
+              port: 2181
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 2181
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
           volumeMounts:
             - name: data
               mountPath: /var/lib/zookeeper/data

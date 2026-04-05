@@ -17,7 +17,7 @@ spec:
       containers:
         - name: order
           image: siddhesh1712/order:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 8083
           env:

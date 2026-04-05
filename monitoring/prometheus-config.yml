@@ -12,19 +12,27 @@ data:
       - job_name: 'coordinator'
         metrics_path: '/actuator/prometheus'
         static_configs:
-          - targets: ['coordinator-service:80']
+          - targets: ['coordinator-service.ecomm.svc.cluster.local:80']
+            labels:
+              application: 'coordinator'
 
       - job_name: 'order-service'
         metrics_path: '/actuator/prometheus'
         static_configs:
-          - targets: ['order-service:80']
+          - targets: ['order-service.ecomm.svc.cluster.local:80']
+            labels:
+              application: 'order-service'
 
       - job_name: 'payment-service'
         metrics_path: '/actuator/prometheus'
         static_configs:
-          - targets: ['payment-service:80']
+          - targets: ['payment-service.ecomm.svc.cluster.local:80']
+            labels:
+              application: 'payment-service'
 
       - job_name: 'inventory-service'
         metrics_path: '/actuator/prometheus'
         static_configs:
-          - targets: ['inventory-service:80']
+          - targets: ['inventory-service.ecomm.svc.cluster.local:80']
+            labels:
+              application: 'inventory-service'
