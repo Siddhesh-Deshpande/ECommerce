@@ -36,3 +36,9 @@ data:
           - targets: ['inventory-service.ecomm.svc.cluster.local:80']
             labels:
               application: 'inventory-service'
+
+      - job_name: 'kafka-exporter'
+        static_configs:
+          - targets: ['kafka-exporter-service.ecomm.svc.cluster.local:9308']
+            labels:
+              application: 'kafka'

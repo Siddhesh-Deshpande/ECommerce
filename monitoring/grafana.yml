@@ -18,6 +18,38 @@ spec:
           image: grafana/grafana
           ports:
             - containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: "admin"
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: "admin"
+          volumeMounts:
+            - name: datasource-config
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-provider-config
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboard-jvm
+              mountPath: /var/lib/grafana/dashboards/jvm
+            - name: dashboard-kafka
+              mountPath: /var/lib/grafana/dashboards/kafka
+            - name: dashboard-sboot3
+              mountPath: /var/lib/grafana/dashboards/sboot3
+      volumes:
+        - name: datasource-config
+          configMap:
+            name: grafana-datasource-config
+        - name: dashboard-provider-config
+          configMap:
+            name: grafana-dashboard-provider-config
+        - name: dashboard-jvm
+          configMap:
+            name: grafana-dashboard-jvm
+        - name: dashboard-kafka
+          configMap:
+            name: grafana-dashboard-kafka
+        - name: dashboard-sboot3
+          configMap:
+            name: grafana-dashboard-sboot3
 
 ---
 apiVersion: v1
