@@ -34,6 +34,8 @@ spec:
               mountPath: /var/lib/grafana/dashboards/kafka
             - name: dashboard-sboot3
               mountPath: /var/lib/grafana/dashboards/sboot3
+            - name: dashboard-autoscaling
+              mountPath: /var/lib/grafana/dashboards/autoscaling
       volumes:
         - name: datasource-config
           configMap:
@@ -50,6 +52,9 @@ spec:
         - name: dashboard-sboot3
           configMap:
             name: grafana-dashboard-sboot3
+        - name: dashboard-autoscaling
+          configMap:
+            name: grafana-dashboard-autoscaling
 
 ---
 apiVersion: v1

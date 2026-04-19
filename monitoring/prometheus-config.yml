@@ -42,3 +42,11 @@ data:
           - targets: ['kafka-exporter-service.ecomm.svc.cluster.local:9308']
             labels:
               application: 'kafka'
+
+      - job_name: 'kube-state-metrics'
+        static_configs:
+          - targets: ['kube-state-metrics.kube-system.svc.cluster.local:8080']
+
+      - job_name: 'cadvisor'
+        static_configs:
+          - targets: ['cadvisor-service.kube-system.svc.cluster.local:8080']

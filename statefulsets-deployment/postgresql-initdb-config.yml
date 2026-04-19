@@ -30,18 +30,18 @@ data:
 
     -- Insert users data (given + some random)
     INSERT INTO users (user_id, balance) VALUES
-                                             (1, 89110),
-                                             (2, 160),
-                                             (3, 160),
-                                             (4, 200),
-                                             (5, 100),
-                                             (6, 50),
-                                             (7, 20),
-                                             (8, 10),
-                                             (9, 250),
-                                             (10, 150),
-                                             (11, 500),
-                                             (12, 75);
+                                             (1, 100000),
+                                             (2, 100000),
+                                             (3, 100000),
+                                             (4, 100000),
+                                             (5, 100000),
+                                             (6, 100000),
+                                             (7, 100000),
+                                             (8, 100000),
+                                             (9, 100000),
+                                             (10, 100000),
+                                             (11, 100000),
+                                             (12, 100000);
 
     -- =========================
     -- ORDER DB
@@ -76,17 +76,17 @@ data:
 
     -- Insert items data (given + some extra)
     INSERT INTO items (item_id, name, quantity, price) VALUES
-                                                           (1, 'laptop', 70, 90),
-                                                           (2, 'phone', 37, 80),
-                                                           (3, 'headphones', 100, 70),
-                                                           (4, 'keyboard', 100, 60),
-                                                           (5, 'mouse', 100, 50),
-                                                           (6, 'monitor', 100, 40),
-                                                           (7, 'printer', 100, 30),
-                                                           (8, 'cable', 100, 20),
-                                                           (9, 'drive', 100, 10),
-                                                           (10, 'webcam', 100, 90),
-                                                           (11, 'tablet', 60, 120),
-                                                           (12, 'speaker', 80, 55);
+                                                           (1, 'laptop', 100000, 10),
+                                                           (2, 'phone', 100000, 10),
+                                                           (3, 'headphones', 100000, 10),
+                                                           (4, 'keyboard', 100000, 10),
+                                                           (5, 'mouse', 100000, 10),
+                                                           (6, 'monitor', 100000, 10),
+                                                           (7, 'printer', 100000, 20),
+                                                           (8, 'cable', 100000, 20),
+                                                           (9, 'drive', 100000, 20),
+                                                           (10, 'webcam', 100000, 20),
+                                                           (11, 'tablet', 100000, 20),
+                                                           (12, 'speaker', 100000, 20);
 
     -- Reserved items table (no insert as requested)
