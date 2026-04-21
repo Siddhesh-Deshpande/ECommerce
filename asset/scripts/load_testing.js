@@ -4,9 +4,9 @@ export let options = {
   scenarios: {
     constant_request_rate: {
       executor: 'constant-arrival-rate',
-      rate: __ENV.VUS ? parseInt(__ENV.VUS) : 1000,
+      rate: __ENV.VUS ? parseInt(__ENV.VUS) : 200,
       timeUnit: '1s',
-      duration: '15s',
+      duration: '60s',
       preAllocatedVUs: 1000,
       maxVUs: 4000,
     },
@@ -14,13 +14,13 @@ export let options = {
 };
 
 export default function () {
-  const url = 'http://192.168.49.2:32603/ecomm/order';
+  const url = 'http://192.168.49.2:30270/ecomm/order';
 
   const payload = JSON.stringify({
-    "clientid":2,
+    "clientid":3,
     "items":[
         {
-            "id":1,
+            "id":3,
             "quantity":1,
             "price":10
         }
