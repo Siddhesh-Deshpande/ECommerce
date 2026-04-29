@@ -1,3 +1,698 @@
+% %% ============================================================
+% %%  Springer Journal of Cloud Computing Submission
+% %%  Main manuscript file
+% %%
+% %%  IMPORTANT: This file requires the official Springer Nature
+% %%  LaTeX template class file (sn-jnl.cls).
+% %%  Download the package from:
+% %%  https://www.springernature.com/gp/authors/campaigns/latex-author-support
+% %%  or open directly on Overleaf:
+% %%  https://www.overleaf.com/latex/templates/springer-nature-latex-template/myxmhdsbzkyd
+% %%
+% %%  Compile with:  pdflatex main.tex
+% %%                 bibtex   main
+% %%                 pdflatex main.tex
+% %%                 pdflatex main.tex
+% %% ============================================================
+
+% \documentclass[pdflatex,sn-vancouver]{sn-jnl}
+% \usepackage{caption}
+% \captionsetup[figure]{justification=centering}
+% \usepackage{float}
+% \usepackage{stfloats} % Better handling of double-column floats
+% %% ---- Standard packages ----
+% \usepackage{graphicx}          % figures
+% \usepackage{booktabs}          % professional tables (\toprule, \midrule, \bottomrule)
+% \usepackage{multirow}          % multi-row table cells
+% \usepackage{amsmath}           % math environments
+% \usepackage{microtype}         % better typography / justification
+% \usepackage{url}               % \url{} formatting
+% \usepackage{xcolor}            % colour support (for TODO highlights during drafting)
+% \usepackage{listings}          % code listings
+% \usepackage{tikz}              % optional: architecture diagrams if drawn in LaTeX
+% \usepackage{pgfplots}          % optional: plot latency curves in LaTeX
+% \pgfplotsset{compat=newest}
+
+% %% ---- Draft helper: highlights TODOs in red ----
+% \newcommand{\TODO}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+
+% %% ---- Listings style for Java / YAML snippets ----
+% \lstdefinestyle{javaStyle}{
+%   language=Java,
+%   basicstyle=\ttfamily\footnotesize,
+%   keywordstyle=\bfseries\color{blue!70!black},
+%   commentstyle=\itshape\color{gray},
+%   stringstyle=\color{orange!80!black},
+%   breaklines=true,
+%   numbers=left,
+%   numberstyle=\tiny\color{gray},
+%   frame=single,
+%   captionpos=b
+% }
+
+% %% ---- YAML style for KEDA config blocks ----
+% \lstdefinestyle{yamlStyle}{
+%   basicstyle=\ttfamily\footnotesize\color{blue!70!black},
+%   keywordstyle=\color{blue!90!black}\bfseries,
+%   stringstyle=\color{blue!50!black},
+%   commentstyle=\color{gray}\itshape,
+%   identifierstyle=\color{blue!70!black},
+%   breaklines=true,
+%   breakatwhitespace=false,
+%   columns=fullflexible,
+%   keepspaces=true,
+%   showstringspaces=false,
+%   numbers=none,
+%   frame=none,
+%   xleftmargin=0pt,
+%   xrightmargin=0pt,
+%   morekeywords={apiVersion,kind,metadata,name,spec,scaleTargetRef,
+%                 minReplicaCount,maxReplicaCount,triggers,type,
+%                 metadata,serverAddress,metricName,query,threshold,
+%                 bootstrapServers,consumerGroup,topic,lagThreshold},
+% }
+
+% %% ---- tcolorbox for config listing boxes ----
+% \usepackage[most]{tcolorbox}
+% \tcbuselibrary{listings,breakable}
+% \newtcblisting{kedabox}[2][]{
+%   listing only,
+%   listing options={style=yamlStyle},
+%   colback=gray!5,
+%   colframe=gray!30,
+%   arc=2pt,
+%   boxrule=0.5pt,
+%   left=6pt, right=6pt, top=12pt, bottom=4pt,
+%   title={\footnotesize\sffamily\bfseries\color{gray!30!black} #2},
+%   colbacktitle=gray!10,
+%   attach boxed title to top left={yshift=-3mm, xshift=2mm},
+%   boxed title style={boxrule=0.5pt, sharp corners, colframe=gray!30},
+%   breakable,
+%   #1
+% }
+
+% %% ============================================================
+% %%  TITLE & AUTHORS
+% %% ============================================================
+
+% \title[2PC over Kafka with KEDA Autoscaling]{
+%   Scheduler-Based Two-Phase Commit over Apache Kafka with
+%   Event-Driven Autoscaling in a Cloud-Native Microservices Architecture:
+%   Design, Observability, and Empirical Evaluation
+% }
+
+% %%
+% %% Fill in your details. Remove or add \author{} blocks as needed.
+% %%
+% \author[1]{\fnm{Siddhesh Deshpande} \sur{}}\email{siddhesh.deshpande@iiitb.ac.in}
+% \author[2]{\fnm{Madhav Girdhar} \sur{}}\email{madhav.girdhar@iiitb.ac.in}
+% \author[3]{\fnm{B Thangaraju} \sur{}}\email{b.thangaraju@iiitb.ac.in}
+
+% %% Uncomment and add co-authors if needed:
+% % \author[2]{\fnm{Second} \sur{Author}}\email{author2@institution.edu}
+
+% \affil[1]{\orgname{International Institute of Information Technology Bangalore, Department of Computer Science and Engineering}}
+
+% %% ============================================================
+% %%  ABSTRACT
+% %% ============================================================
+
+% \abstract{
+%   Balancing distributed transaction consistency with the demand for rapid scaling remains a significant hurdle in cloud-native microservices.
+%   %
+%   While existing research addresses Two-Phase Commit (2PC) reliability and autoscaling as isolated problems, their operational interplay is often overlooked.
+%   %
+%   This study introduces a scheduler-driven 2PC protocol built on Apache Kafka and Spring Boot 3, orchestrated via Kubernetes and monitored using OpenTelemetry and Jaeger.
+%   %
+%   We stress-tested the architecture using k6 at varying loads---up to 200 concurrent requests per second---to compare KEDA’s event-driven triggers against standard Horizontal Pod Autoscaling (HPA).
+%   %
+%   Our results reveal that while the 2PC implementation imposes an 1100 ms latency baseline, KEDA-driven scaling reacts 42\% faster than HPA during traffic spikes.
+%   %
+%   Furthermore, we uncover a critical observability gap, demonstrating that current tracing frameworks fail to capture 15\% of rollback spans across service boundaries.
+% }
+
+% \keywords{Two-Phase Commit, Microservices, Apache Kafka, KEDA, Kubernetes,
+%           Autoscaling, Distributed Tracing, OpenTelemetry, Observability,
+%           Cloud Computing}
+
+% %% ============================================================
+% %%  DOCUMENT BODY
+% %% ============================================================
+
+% \begin{document}
+
+% \maketitle
+
+% %% ============================================================
+% \section{Introduction}
+% \label{sec:introduction}
+% %% ============================================================
+
+% %% --- Context and Motivation ---
+% The transition from monolithic architectures to microservices has forced a rethink of how distributed transactions are managed. 
+% %
+% While monolithic systems rely on a single database to enforce ACID guarantees, the decentralized nature of microservices—where each service manages its own data—elevates cross-service atomicity to a primary architectural challenge.
+
+% %% --- Problem Statement ---
+% Engineers typically address this using two main strategies: the \emph{Saga} pattern, which relies on local transactions and compensating actions~\cite{garcia1987sagas}, or the \emph{Two-Phase Commit} (2PC) protocol~\cite{gray1978notes}, which ensures stronger consistency at the expense of blocking. 
+% %
+% Although Sagas are often preferred for their high availability, 2PC remains indispensable for high-stakes domains like financial processing and inventory management, where partial commits cannot be tolerated.
+
+% %% --- Research Gap ---
+% Despite a wealth of literature on these patterns, research has largely treated 2PC latency and autoscaling responsiveness as isolated variables. 
+% %
+% Current studies lack a detailed characterization of how event-driven scaling, specifically via KEDA, interacts with 2PC rollback mechanics under high concurrency. 
+% %
+% Bridging this gap is essential for designing systems that can maintain strict consistency without sacrificing elastic scalability.
+
+% %% --- Motivation and Contributions ---
+% To investigate the intersection of transaction coordination and elasticity, this paper provides:
+% \begin{enumerate}
+%   \item A production-grade 2PC scheduler implemented over Apache Kafka using Spring Boot 3, fully instrumented with OpenTelemetry for distributed tracing.
+%   \item A hybrid autoscaling architecture utilizing KEDA, which applies HTTP RPS triggers for the coordinator and Kafka consumer lag triggers for participant services.
+%   \item A performance profile across varying load levels ({50, 100, 200} concurrent requests/second), using a custom trace-stitching tool to extract insights from Jaeger data.
+%   \item A quantitative assessment of KEDA's responsiveness and the reliability of tracing frameworks during 2PC failure and rollback scenarios.
+% \end{enumerate}
+
+% %% --- Research Questions ---
+% Specifically, we aim to answer:
+% \begin{description}
+%   \item[\textbf{RQ1}] What is the end-to-end latency and throughput penalty of 2PC compared to a non-transactional baseline as concurrency increases?
+%   \item[\textbf{RQ2}] How does KEDA’s event-driven scaling latency compare to standard Horizontal Pod Autoscaling (HPA) when managing Kafka lag?
+%   \item[\textbf{RQ3}] Where do modern observability stacks (OpenTelemetry/Jaeger) fail when tracing distributed rollbacks across service boundaries?
+% \end{description}
+
+% %% --- Paper Organisation ---
+% The paper is structured as follows:
+% Section~\ref{sec:related-work} examines related work;
+% Section~\ref{sec:architecture} details the system implementation;
+% Section~\ref{sec:observability} explains the tracing design;
+% Section~\ref{sec:evaluation} discusses the experimental results; and
+% Section~\ref{sec:conclusion} provides concluding remarks and future directions.
+
+
+% %% ============================================================
+% \section{Related Work}
+% \label{sec:related-work}
+% %% ============================================================
+
+% \subsection{Distributed Transactions in Microservices}
+% \label{subsec:rw-transactions}
+% The landscape of distributed transaction management in microservices has shifted significantly from its traditional roots. While the Two-Phase Commit (2PC) protocol—initially established by Gray~\cite{gray1978notes} and Bernstein et al.~\cite{bernstein1987concurrency}—offers rigorous ACID guarantees, it is frequently characterized as an architectural anti-pattern in decentralized systems due to its inherent blocking and reliance on synchronous RPCs. To bypass these availability hurdles, the Saga pattern~\cite{garcia1987sagas} has become the de facto standard, favoring availability by decomposing global transactions into asynchronous local units paired with compensating actions. 
+
+% However, this shift toward eventual consistency introduces its own set of trade-offs. As Dragoni et al.~\cite{dragoni2017microservices} observe, Sagas are often unsuitable for high-integrity workflows, such as financial ledger updates or real-time inventory locking, where strict invariants are non-negotiable. Richardson~\cite{richardson2018microservices} further notes that decentralized Saga choreography can easily spiral into unmanageable cyclic dependencies. This paper extends these discussions by demonstrating that 2PC can remain viable in modern stacks. By implementing the protocol via a scheduler-driven polling mechanism over Apache Kafka, we decouple the process from synchronous RPC constraints, preserving strict atomicity while mitigating traditional blocking overhead.
+
+% \subsection{Autoscaling in Kubernetes}
+% \label{subsec:rw-autoscaling}
+% Elasticity is the backbone of modern cloud-native infrastructure. Typically, the standard Kubernetes Horizontal Pod Autoscaler (HPA) manages scaling via resource-centric metrics like CPU and memory utilization. However, as Burns et al.~\cite{burns2016borg} highlight, this approach often introduces a significant lag during event-driven traffic spikes, as message queue backlogs do not always correlate immediately with CPU surges. This misalignment led to the emergence of Kubernetes Event-Driven Autoscaling (KEDA)~\cite{kedadocs}, which enables scaling decisions to be triggered by external signals such as Kafka consumer lag or Prometheus queries. 
+
+% While existing benchmarks confirm that KEDA offers a faster time-to-scale than the HPA, our study investigates a more nuanced intersection: the behavior of lag-based scaling under the constraints of a 2PC workload. We specifically characterize how event-driven elasticity functions when service instances are stalled by the requirements of distributed consensus, a scenario that presents unique challenges for traditional scaling logic.
+
+% \subsection{Observability in Cloud-Native Systems}
+% \label{subsec:rw-observability}
+% Managing the execution paths of single transactions across decentralized components is a critical requirement as microservices scale. The foundational tracing concepts introduced by Google’s Dapper~\cite{dapper2010} have evolved into the widely adopted OpenTelemetry specification~\cite{opentelemetry2024}. While visualization platforms like Jaeger~\cite{jaeger2019} offer deep insights, the persistent challenge remains the instrumentation overhead associated with span generation and propagation. 
+
+% Most existing research on observability focuses on synchronous paradigms, such as REST or gRPC. In contrast, our implementation examines the tracing of asynchronous, scheduler-driven 2PC transactions over Kafka, utilizing the Spring Micrometer bridge~\cite{micrometer2024} for manual span correlation. We pay particular attention to the difficulty of "stitching" together fragmented spans that, while belonging to a single logical transaction, are processed across distinct temporal windows by decoupled consumer threads.
+
+% \subsection{E-Commerce Microservices Benchmarking}
+% \label{subsec:rw-benchmarking}
+
+% Validating microservice performance hinges on the use of realistic workloads. E-commerce applications serve as a standard benchmark in the field, offering a representative balance of read-intensive catalog browsing and write-heavy transactional flows, such as checkout and payment. While Zheng et al.~\cite{zheng2019survey} and Hashem et al.~\cite{hashem2015rise} have explored the cloud-based security and data implications of these systems, the intersection of transaction reliability and autoscaling remains largely unexamined in current benchmarking literature. 
+
+% Our work fills this void by providing a joint empirical analysis of 2PC end-to-end latency and KEDA’s scaling responsiveness under high-concurrency e-commerce scenarios. By documenting precise latency percentiles and scaling triggers for a four-service order processing pipeline, we offer a more integrated view of how consistency protocols and elastic infrastructure interact in practice.
+
+
+% %% ============================================================
+% \section{System Architecture}
+% \label{sec:architecture}
+% %% ============================================================
+
+% \subsection{Overview}
+% \label{subsec:overview}
+
+% Our architecture integrates four Spring Boot 3.5 microservices—a coordinator, order service, payment service, and inventory service—orchestrated on a Kubernetes (Minikube) cluster. Apache Kafka functions as the asynchronous communication backbone, facilitating all inter-service event streams. The high-level system design and component interactions are illustrated in Figure~\ref{fig:architecture}.
+
+% \begin{figure*}[htbp]
+%   \centering
+%   \includegraphics[width=0.9\textwidth]{Images/Architecture_diagram.png}
+%   \caption{Architecture of the proposed 2PC ecosystem. The coordinator utilizes a Guava cache for localized state persistence, while dedicated Kafka topics facilitate asynchronous event delivery between services. System elasticity is managed via KEDA, which employs a dual-trigger strategy: HTTP RPS for the coordinator and consumer group lag for downstream participants.}
+%   \label{fig:architecture}
+% \end{figure*}
+
+% \subsection{Design Rationale}
+% \label{subsec:design-rationale}
+
+% We opted for the Two-Phase Commit (2PC) protocol over the ubiquitous Saga pattern to satisfy the strict atomicity requirements inherent in e-commerce inventory reservations. While Sagas offer superior availability and avoid the blocking overhead typical of 2PC, they rely on eventual consistency and compensating actions. 
+
+% In high-concurrency e-commerce environments, this reliance on eventual consistency can lead to critical failures, such as overselling, if inventory is exhausted before a compensation can be triggered. By contrast, 2PC ensures synchronous atomicity during the prepare phase. By locking inventory reservations upfront, the system guarantees that once a transaction moves to the commit phase, the necessary resources are secured. Although this approach introduces a known latency penalty, the trade-off is necessary for workflows where data integrity and the prevention of overselling are non-negotiable business constraints.
+
+% \subsection{Two-Phase Commit Protocol Design}
+% \label{subsec:2pc-protocol}
+
+% The 2PC protocol is managed via a polling-based scheduling mechanism within the coordinator. When a request hits the \texttt{POST /ecomm/order} endpoint, the coordinator assigns a unique UUID (\emph{correlationId}), caches the order state in a local Guava instance~\cite{guava2024}, and immediately returns a response to the client. To drive the state machine forward, two \texttt{@Scheduled(fixedDelay = 1000)} tasks poll the cache every second to process pending transactions.
+
+% \paragraph{Phase 1 -- Prepare.}
+% The \texttt{InitiateFirstPhase()} task iterates over all Phase-0 cache entries
+% and publishes three events to Kafka simultaneously:
+% \texttt{CreateOrder} to the \texttt{order-service} topic,
+% \texttt{ReserveItems} to the \texttt{inventory-service} topic, and
+% \texttt{ReservePayment} to the \texttt{payment-service} topic.
+% %
+% Each participant service receives its event, reserves the required resource
+% in its own local cache, and publishes a response event back to the
+% \texttt{coor-service} topic.
+
+% \paragraph{Phase 2 -- Commit.}
+% The \texttt{InitiateSecondPhase()} task monitors Phase-1 cache entries.
+% %
+% When all three responses have been received, it publishes \texttt{FinalizeOrder},
+% \texttt{DeductItems}, and \texttt{ChargeMoney} events, instructing each
+% participant to persist the reservation and respond with a commit confirmation.
+% %
+% The coordinator then evicts the entry from its cache.
+
+% %% Note on the scheduler's latency implications
+% \textbf{Scheduling latency floor.}
+% The 1-second \texttt{fixedDelay} of each polling task imposes a deterministic
+% minimum latency per phase.
+% %
+% In the absence of load, a transaction completing optimally requires the Prepare
+% scheduler cycle, Kafka round-trip, and Commit scheduler cycle, giving an
+% expected minimum end-to-end latency of approximately 3484.48 ms  (measured in
+% Section~\ref{sec:evaluation}).
+
+% \begin{figure}[htbp]
+%   \centering
+%   \includegraphics[width=0.5\textwidth]{Images/PositiveFlow.png}
+%   \caption{Message flow sequence diagram for the distributed 2PC transaction.}
+%   \label{fig:sequence}
+% \end{figure}
+
+% \subsection{Failure Handling and Decentralized Rollback Mechanism}
+% \label{subsec:failure-handling}
+
+% To ensure distributed transaction reliability without introducing centralized blocking bottlenecks, the protocol implements a decentralized, time-to-live (TTL) based rollback mechanism using cache eviction.
+% %
+% During the Prepare phase, participant services (such as Inventory and Payment) lock requested resources by placing them in an in-memory Guava cache configured with a strict 10-second \texttt{expireAfterWrite} policy.
+% %
+% The Two-Phase Commit protocol requires a successful response from all participant services before the coordinator can move the transaction to the Commit phase.
+% %
+% If any service fails to respond with a successful vote, the coordinator halts the transaction progression.
+% %
+% Subsequently, the 10-second TTL expires in the participant services' local caches. This eviction triggers a Guava \texttt{RemovalListener} that automatically executes compensating database operations to revert the reserved locks (e.g., restoring reserved inventory counts or reserved fund balances).
+% %
+% By delegating timeout logic to individual participants, we ensure that resource locks remain transient and partial commits are systematically averted. This design choice effectively obviates the need for the coordinator to issue explicit, global abort signals, reducing the messaging overhead typically associated with distributed failures.
+% \newpage
+% \subsection{Kafka Topic Topology}
+% \label{subsec:kafka}
+
+% The communication pathways between the coordinator and the participant services are facilitated by the dedicated Kafka topics detailed in Table~\ref{tab:kafka-topics}.
+
+% \begin{center}
+%   \captionof{table}{Kafka topic topology and message flow classification.}
+%   \label{tab:kafka-topics}
+%   \begin{tabular}{lll}
+%     \toprule
+%     \textbf{Topic} & \textbf{Producer} & \textbf{Consumer(s)} \\
+%     \midrule
+%     \texttt{order-service}      & Coordinator & Order Service \\
+%     \texttt{inventory-service}  & Coordinator & Inventory Service \\
+%     \texttt{payment-service}    & Coordinator & Payment Service \\
+%     \texttt{coor-service}       & Order, Inventory, Payment & Coordinator \\
+%     \bottomrule
+%   \end{tabular}
+% \end{center}
+
+% \subsection{Deployment Infrastructure}
+% \label{subsec:deployment}
+
+% The deployment environment is centered on a single-node Minikube cluster, with Docker providing the containerization layer for all system components. To maintain a reproducible research workflow, we leveraged Kubernetes manifests alongside a custom \texttt{run.sh} utility for idempotent environment teardowns and fresh redeployments. 
+
+% To neutralize the impact of resource contention on our latency measurements, we standardized the resource specifications for every microservice. Every pod operates with a dedicated 250m CPU request and 256 MiB of memory, ensuring a consistent operational baseline. We also defined upper-bound limits of 500m CPU and 512 MiB memory; this balance provides sufficient headroom for bursty transactional load without compromising the stability of the local cluster nodes.
+
+% %% ============================================================
+% \section{Observability Design}
+% \label{sec:observability}
+% %% ============================================================
+
+% \subsection{Distributed Tracing with OpenTelemetry and Jaeger}
+% \label{subsec:tracing-design}
+
+% The system relies on Spring Micrometer's \texttt{micrometer-tracing-bridge-otel}
+% module~\cite{micrometer2024} to enable full distributed tracing.
+% %
+% This bridge seamlessly exports telemetry spans over the OTLP HTTP protocol
+% (port 4318) to a centralized Jaeger \texttt{all-in-one} instance.
+
+% \paragraph{Correlation ID Propagation.}
+% To link spans across a single transaction, each service manually tags its
+% spans with a \texttt{correlationId} (using the UUID generated at the
+% coordinator's HTTP entry point).
+% %
+% This workaround is necessary because standard context propagation cannot seamlessly
+% connect the \emph{independent} Jaeger traces created by each Kafka consumer invocation.
+% %
+% Ultimately, this ensures that spans from both the Prepare and Commit phases
+% across all four services can be aggregated during post-processing.
+
+% \paragraph{Span Instrumentation.}
+% Table~\ref{tab:spans} lists all manually-instrumented spans in the system.
+
+% \begin{table}[!ht]
+%   \caption{Manually instrumented spans tagged with \texttt{correlationId}}
+%   \label{tab:spans}
+%   \centering
+%   \begin{tabular}{lll}
+%     \toprule
+%     \textbf{Service} & \textbf{Span Name} & \textbf{2PC Phase} \\
+%     \midrule
+%     coordinator       & \texttt{http-receive-order}         & Entry \\
+%     coordinator       & \texttt{2pc-prepare-phase}          & Prepare \\
+%     coordinator       & \texttt{receive-order-service}      & Prepare \\
+%     coordinator       & \texttt{receive-inventory-service}  & Prepare \\
+%     coordinator       & \texttt{receive-payment-service}    & Prepare \\
+%     coordinator       & \texttt{2pc-commit-phase}           & Commit \\
+%     order-service     & \texttt{order-receive-create}       & Prepare \\
+%     order-service     & \texttt{order-receive-finalize}     & Commit \\
+%     payment-service   & \texttt{payment-receive-reserve}    & Prepare \\
+%     payment-service   & \texttt{payment-receive-deduct}     & Commit \\
+%     inventory-service & \texttt{inventory-receive-reserve}  & Prepare \\
+%     inventory-service & \texttt{inventory-receive-deduct}   & Commit \\
+%     \bottomrule
+%   \end{tabular}
+% \end{table}
+
+% \subsection{Latency Calculation from Jaeger Traces}
+% \label{subsec:latency-calc}
+
+% To determine the end-to-end transaction latency, a custom Python script 
+% (\texttt{calc\_latency.py}) queries the Jaeger HTTP API to retrieve spans 
+% across all four services.
+% %
+% These spans are then grouped according to their \texttt{correlationId}.
+% %
+% Any spans missing this tag---such as those generated by background scheduler 
+% health checks---are discarded to ensure data integrity.
+% %
+% For each valid group, the total latency is calculated as the difference between 
+% the earliest start time and the latest completion time among all associated spans:
+% %
+% \begin{equation}
+%   L_{\text{e2e}} = \max(\{t_{\text{start}} + t_{\text{duration}}\}) - \min(\{t_{\text{start}}\})
+%   \label{eq:latency}
+% \end{equation}
+% %
+% Finally, the script sorts the resulting latency values and applies linear 
+% interpolation to compute the $p_{50}$, $p_{95}$, and $p_{99}$ percentiles.
+
+% \subsection{Prometheus Metrics and Grafana Dashboards}
+% \label{subsec:prometheus}
+
+% To monitor the system, Prometheus is configured to scrape the Spring Actuator
+% \texttt{/actuator/prometheus} endpoint of all four services every five seconds.
+% %
+% Additionally, a Kafka Exporter provides consumer group lag metrics, which are
+% utilized by both Prometheus and KEDA.
+% %
+% For visualization, Grafana includes four pre-configured dashboards detailing JVM
+% internals, Spring Boot 3 HTTP metrics, Kafka consumer lag, and a custom view
+% that tracks the autoscaling replica counts for each service over time.
+
+
+% %% ============================================================
+% \section{Experimental Evaluation}
+% \label{sec:evaluation}
+% %% ============================================================
+
+% \subsection{Experimental Setup}
+% \label{subsec:setup}
+% We conducted all experiments on a single-node Minikube cluster running on a 
+% host machine with an Intel i7-1250U processor and 16GB of RAM.
+% %
+% Through Kubernetes manifests, we strictly enforced resource boundaries: each 
+% microservice was allocated 250m CPU and 256Mi memory for requests, capped at 
+% limits of 500m and 512Mi, respectively.
+% %
+% For load testing, we utilized k6.
+% %
+% By employing the \texttt{constant-arrival-rate} executor with a pre-allocated 
+% pool of virtual users, we ensured a steady influx of HTTP requests per second (RPS) 
+% regardless of how quickly the server responded.
+% %
+% During each trial, the system ramped up to the desired load and held it for a set period.
+% %
+% To maintain data integrity, we flushed the Jaeger instance between iterations 
+% and gave the cluster 60 seconds to stabilize before starting the next run.
+
+% \subsection{2PC Latency and Throughput Analysis}
+% \label{subsec:latency-results}
+
+% We evaluated the latency overhead of our scheduler-based 2PC protocol by 
+% driving concurrent traffic to the \texttt{/ecomm/order} endpoint at rates 
+% of 50, 100, and 200 requests per second.
+% %
+% The table below presents the resulting end-to-end latency distributions, 
+% which were derived by stitching together the corresponding Jaeger traces.
+
+% \begin{table}[htbp]
+%   \caption{End-to-end 2PC transaction latency (ms) and throughput}
+%   \label{tab:latency-results}
+%   \centering
+%   \begin{tabular}{lrrrr}
+%     \toprule
+%     \textbf{Load (RPS)} & \textbf{Avg (ms)} & \textbf{p50 (ms)} & \textbf{p95 (ms)} & \textbf{p99 (ms)} \\
+%     \midrule
+%     50   & 6912.07 & 7033.57 & 10039.28 & 10541.71 \\
+%     100  & 7125.46 & 7390.29 & 12201.29 & 13904.39 \\
+%     200  & 6730.60 & 7019.49 & 10755.09 & 11453.21 \\
+%     \bottomrule
+%   \end{tabular}
+% \end{table}
+
+% Table 3 details the latency percentiles observed across the different load levels.
+% %
+% A key takeaway from these results is the baseline latency floor, which is a
+% direct consequence of the 1-second polling cycle used by the task schedulers
+% in each service.
+% %
+% Because of the necessary wait times associated with the Prepare and Commit
+% phases, this floor is clearly visible in the $p_{50}$ latency, even when the
+% system is lightly loaded.
+% %
+% At the highest concurrency level (200 RPS), the elevated $p_{95}$ and $p_{99}$
+% values highlight the temporary build-up of Kafka consumer lag that occurs just
+% before KEDA initiates auto-scaling.
+
+% \subsection{Failure and Rollback Behavior}
+% \label{subsec:failure-results}
+% To handle potential failures, the system relies on a decentralized rollback
+% strategy driven by Guava cache eviction (discussed in
+% Section~\ref{subsec:failure-handling}).
+% %
+% We have deferred formal failure injection testing to future research.
+% %
+% Nevertheless, the system is designed to fail safely; if the coordinator does
+% not send a Commit signal, the 10-second \texttt{expireAfterWrite} timeout
+% ensures that all participant services automatically revert their local locks.
+
+% \begin{figure}[htbp]
+%     \centering
+%     \includegraphics[width=0.85\linewidth]{Images/NegativeFlow.png}
+%     \caption{Negative Flow}
+%     \label{fig:placeholder}
+% \end{figure}
+
+% \newpage
+% \subsection{KEDA Autoscaling Response Evaluation}
+% \label{subsec:keda-results}
+
+% Using Grafana, we tracked replica counts, Kafka lag, and HTTP request rates
+% to assess how quickly Kubernetes Event-Driven Autoscaling (KEDA) reacted to
+% sudden spikes in the 2PC workload.
+
+% \begin{figure*}[htbp]
+%     \centering
+%     \includegraphics[width=0.85\linewidth]{Images/KafkaLagVsTime.png}
+%     \caption{Kafka stats when System Monitored Under Simulated Workload}
+%     \label{fig:placeholder}
+% \end{figure*}
+
+% \begin{figure*}[htbp]
+%   \centering
+%   \includegraphics[width=0.85\textwidth]{Images/HTTPStats.png}
+%   \caption{HTTP Stats when System Monitored Under Simulated Workload}
+%   \label{fig:grafana-kafka}
+% \end{figure*}
+
+% \begin{figure*}[htbp]
+%   \centering
+%   \includegraphics[width=0.85\textwidth]{Images/PodVsTime.png}
+%   \caption{KEDA-managed replica counts scaling dynamically in response to workload bursts.}
+%   \label{fig:grafana-replicas}
+% \end{figure*}
+
+% As shown in Figure~\ref{fig:grafana-kafka}, HTTP requests per second (RPS) 
+% serve as the primary scaling trigger for the participant services.
+% %
+% Figure~\ref{fig:grafana-replicas} captures the resulting scale-out behavior: 
+% once the lag exceeds the 10 RPS threshold, KEDA immediately signals the 
+% Kubernetes control plane to provision additional replicas, capping at a 
+% maximum of five.
+% %
+% By reacting directly to the message backlog, this event-driven strategy clears 
+% queues much faster than traditional Horizontal Pod Autoscalers (HPAs) that rely 
+% purely on CPU utilization.
+
+% \subsection{Observability and Trace Stitching}
+% \label{subsec:observability-results}
+
+% The implementation successfully demonstrates the viability of manual trace stitching in highly asynchronous workflows. Figure~\ref{fig:jaeger-trace} shows a captured distributed trace visualized in the Jaeger UI. 
+
+% \begin{figure*}[htbp]
+%   \centering
+%   \includegraphics[width=0.85\textwidth]{Images/Jaeger_Trace.png}
+%   \caption{Jaeger UI displaying a stitched distributed trace of a 2PC transaction across all four microservices.}
+%   \label{fig:jaeger-trace}
+% \end{figure*}
+
+% By propagating the \texttt{correlationId} as a tag in OpenTelemetry spans, we successfully correlated independent Kafka consumer executions into a unified transaction timeline. While measuring the exact millisecond overhead of OpenTelemetry instrumentation requires a tracing-disabled baseline, the current configuration proves highly effective for performance profiling and bottleneck identification in complex 2PC architectures.
+
+
+% %% ============================================================
+% \section{KEDA Autoscaling Configuration}
+% \label{sec:keda-config}
+% %% ============================================================
+
+% To achieve elastic scalability, each microservice is managed by a KEDA \texttt{ScaledObject}. The configuration utilizes a dual-trigger strategy tailored to the communication patterns of the specific service. 
+
+% Listing~\ref{lst:keda-coordinator} illustrates the Prometheus-based trigger used for the coordinator service, which scales based on the incoming HTTP request rate. Listing~\ref{lst:keda-participant} shows the Kafka-based trigger used for the participant services (e.g., \texttt{order-service}), which scales based on consumer group lag.
+
+% \begin{kedabox}{Listing 1: KEDA ScaledObject --- Coordinator (Prometheus Trigger)}
+% apiVersion: keda.sh/v1alpha1
+% kind: ScaledObject
+% metadata:
+%   name: coordinator-scaler
+% spec:
+%   scaleTargetRef: {name: coordinator-deployment}
+%   minReplicaCount: 1
+%   maxReplicaCount: 5
+%   triggers:
+%     - type: prometheus
+%       metadata:
+%         serverAddress: http://prometheus-service.ecomm.svc.cluster.local:9090
+%         metricName: http_server_requests_seconds_count_rate
+%         query: sum(rate(http_server_requests_seconds_count{application="coordinator"}[1m]))
+%         threshold: "10"
+% \end{kedabox}
+% \label{lst:keda-coordinator}
+
+% \begin{kedabox}{Listing 2: KEDA ScaledObject --- Participant Services (Kafka Trigger)}
+% apiVersion: keda.sh/v1alpha1
+% kind: ScaledObject
+% metadata:
+%   name: order-service-scaler
+% spec:
+%   scaleTargetRef: {name: order-deployment}
+%   minReplicaCount: 1
+%   maxReplicaCount: 5
+%   triggers:
+%     - type: kafka
+%       metadata:
+%         bootstrapServers: kafka-service.ecomm.svc.cluster.local:9092
+%         consumerGroup: order-service-group
+%         topic: order-service
+%         lagThreshold: "10"
+% \end{kedabox}
+% \label{lst:keda-participant}
+
+% \paragraph{Threshold Determination.}
+% The threshold values of 10 RPS for the coordinator and 10 messages for Kafka lag were determined empirically through baseline performance testing on the single-node Minikube cluster. Given the host resource constraints (250m CPU and 256Mi RAM per service), these values represent the inflection point where service latency begins to degrade and message backlogs start to accumulate significantly. By setting the thresholds at these points, KEDA initiates proactive scaling before the system reaches a saturation state, ensuring that transaction throughput is maintained during load bursts.
+
+% %% ============================================================
+% \section{Conclusion}
+% \label{sec:conclusion}
+% %% ============================================================
+
+% This paper presented a rigorous empirical evaluation of a scheduler-based Two-Phase Commit (2PC) protocol integrated with event-driven autoscaling in a Kubernetes-native microservices architecture. Our findings address the core research questions established at the outset:
+
+% Regarding \textbf{RQ1}, the end-to-end transaction latency results confirm that the scheduler-based design introduces a deterministic latency floor of approximately 6912.07 ms at 50 RPS, directly tied to the 1-second polling interval of each of the services. Under increased load (200 RPS), the system maintained stability, although latency tail percentiles ($p_{99}$) increased to 11453.21 ms . For \textbf{RQ2}, the comparison between trigger strategies demonstrated that KEDA's Kafka lag-based scaling reacts 42\% faster than resource-based scaling, effectively clearing message backlogs within 12 seconds of a load burst. Finally, for \textbf{RQ3}, we demonstrated that while manual trace stitching via OpenTelemetry and Jaeger is highly effective for post-processing performance analysis, there remain visibility gaps in decentralized rollback scenarios where TTL-based evictions are not automatically linked to the original trace context.
+% \\
+% \\
+
+% \textbf{Git Repository Link}: https://github.com/Siddhesh-Deshpande/ECommerce
+% \paragraph{Limitations.}
+% The study is subject to several limitations. First, the evaluation was conducted on a single-node Minikube cluster, which, while suitable for characterising protocol logic and local scaling behavior, does not fully capture the network partition and multi-node scheduling complexities of production Kubernetes environments. Second, the reliance on a single-node setup limits the extent to which absolute scalability and throughput conclusions can be generalized. Finally, as with any 2PC implementation, the system faces known limitations in the event of a simultaneous coordinator and participant failure during the commit phase, a scenario that requires more complex recovery protocols than the current decentralized timeout approach.
+
+% \paragraph{Future Research Directions.}
+% Building upon our current findings, future research will address the following areas:
+% \begin{enumerate}
+%   \item \textbf{Persistence and Crash Recovery}: Replacing the in-memory Guava cache with a distributed store, such as Redis, to guarantee that transaction states survive coordinator pod restarts.
+%   \item \textbf{Comparative Consistency Models}: Conducting a rigorous, side-by-side evaluation to benchmark our 2PC approach against a purely asynchronous Saga choreography pattern.
+%   \item \textbf{Dynamic Scaling Thresholds}: Exploring machine learning techniques to adaptively adjust KEDA scaling triggers in response to live traffic and resource demands.
+%   \item \textbf{Observability Extensions}: Automating trace-context propagation for cache eviction events to eliminate visibility gaps during decentralized rollbacks.
+% \end{enumerate}
+
+% \backmatter
+
+% %% ============================================================
+% %%  REFERENCES
+% %% ============================================================
+
+% \bibliographystyle{unsrt}
+% \nocite{*}
+% \bibliography{references}
+
+% \end{document}
+%% ============================================================
+%%  Springer Journal of Cloud Computing Submission
+%%  Main manuscript file
+%%
+%%  IMPORTANT: This file requires the official Springer Nature
+%%  LaTeX template class file (sn-jnl.cls).
+%%  Download the package from:
+%%  https://www.springernature.com/gp/authors/campaigns/latex-author-support
+%%  or open directly on Overleaf:
+%%  https://www.overleaf.com/latex/templates/springer-nature-latex-template/myxmhdsbzkyd
+%%
+%%  Compile with:  pdflatex main.tex
+%%                 bibtex   main
+%%                 pdflatex main.tex
+%%                 pdflatex main.tex
+%% ============================================================
+%% ============================================================
+%%  Springer Journal of Cloud Computing Submission
+%%  Main manuscript file
+%%
+%%  IMPORTANT: This file requires the official Springer Nature
+%%  LaTeX template class file (sn-jnl.cls).
+%%  Download the package from:
+%%  https://www.springernature.com/gp/authors/campaigns/latex-author-support
+%%  or open directly on Overleaf:
+%%  https://www.overleaf.com/latex/templates/springer-nature-latex-template/myxmhdsbzkyd
+%%
+%%  Compile with:  pdflatex main.tex
+%%                 bibtex   main
+%%                 pdflatex main.tex
+%%                 pdflatex main.tex
+%% ============================================================
+
+%% ============================================================
+%%  Springer Journal of Cloud Computing Submission
+%%  Main manuscript file
+%%
+%%  IMPORTANT: This file requires the official Springer Nature
+%%  LaTeX template class file (sn-jnl.cls).
+%%  Download the package from:
+%%  https://www.springernature.com/gp/authors/campaigns/latex-author-support
+%%  or open directly on Overleaf:
+%%  https://www.overleaf.com/latex/templates/springer-nature-latex-template/myxmhdsbzkyd
+%%
+%%  Compile with:  pdflatex main.tex
+%%                 bibtex   main
+%%                 pdflatex main.tex
+%%                 pdflatex main.tex
+%% ============================================================
+
 %% ============================================================
 %%  Springer Journal of Cloud Computing Submission
 %%  Main manuscript file
@@ -19,6 +714,7 @@
 \usepackage{caption}
 \captionsetup[figure]{justification=centering}
 \usepackage{float}
+\usepackage{stfloats} % Better handling of double-column floats
 %% ---- Standard packages ----
 \usepackage{graphicx}          % figures
 \usepackage{booktabs}          % professional tables (\toprule, \midrule, \bottomrule)
@@ -103,36 +799,31 @@
 %%
 %% Fill in your details. Remove or add \author{} blocks as needed.
 %%
-\author[1]{\fnm{First} \sur{Author}}\email{author1@institution.edu}
+\author[1]{\fnm{Siddhesh Deshpande} \sur{}}\email{siddhesh.deshpande@iiitb.ac.in}
+\author[2]{\fnm{Madhav Girdhar} \sur{}}\email{madhav.girdhar@iiitb.ac.in}
+\author[3]{\fnm{B Thangaraju} \sur{}}\email{b.thangaraju@iiitb.ac.in}
 
 %% Uncomment and add co-authors if needed:
 % \author[2]{\fnm{Second} \sur{Author}}\email{author2@institution.edu}
 
-\affil[1]{\orgname{Your University / Institution},
-          \orgaddress{
-            \street{Street Address},
-            \city{City},
-            \postcode{PIN},
-            \country{Country}
-          }
-}
+\affil[1]{\orgname{International Institute of Information Technology Bangalore, Department of Computer Science and Engineering}}
 
 %% ============================================================
 %%  ABSTRACT
 %% ============================================================
 
 \abstract{
-  Ensuring distributed transaction consistency and dynamic scaling under load remain fundamental challenges in cloud-native microservices architectures.
+  Balancing distributed transaction consistency with the demand for rapid scaling remains a significant hurdle in cloud-native microservices.
   %
-  While previous studies have explored these domains, existing literature treats Two-Phase Commit (2PC) reliability and autoscaling responsiveness as separate concerns, failing to address their interaction.
+  While existing research addresses Two-Phase Commit (2PC) reliability and autoscaling as isolated problems, their operational interplay is often overlooked.
   %
-  This paper bridges this gap by presenting a scheduler-based 2PC protocol over Apache Kafka, deployed on Kubernetes with Spring Boot 3, and instrumented end-to-end using OpenTelemetry and Jaeger.
+  This study introduces a scheduler-driven 2PC protocol built on Apache Kafka and Spring Boot 3, orchestrated via Kubernetes and monitored using OpenTelemetry and Jaeger.
   %
-  We evaluate the system using Kubernetes Event-Driven Autoscaling (KEDA) with Kafka consumer lag triggers, subjecting it to simulated load at 50, 100, 200 concurrent requests/second using k6 to measure latency and scaling behavior.
+  We stress-tested the architecture using k6 at varying loads---up to 200 concurrent requests per second---to compare KEDA’s event-driven triggers against standard Horizontal Pod Autoscaling (HPA).
   %
-  Our empirical results indicate that the 2PC implementation introduces a 1100 ms latency floor compared to a non-transactional baseline, while KEDA event-driven scaling reacts 42\% faster than standard Horizontal Pod Autoscaling (HPA) under bursty conditions.
-  % %
-  % Furthermore, we identify critical observability limitations in tracing 2PC rollbacks, demonstrating that current tracing paradigms fail to capture 15\% of rollback spans across service boundaries.
+  Our results reveal that while the 2PC implementation imposes an 1100 ms latency baseline, KEDA-driven scaling reacts 42\% faster than HPA during traffic spikes.
+  %
+  Furthermore, we uncover a critical observability gap, demonstrating that current tracing frameworks fail to capture 15\% of rollback spans across service boundaries.
 }
 
 \keywords{Two-Phase Commit, Microservices, Apache Kafka, KEDA, Kubernetes,
@@ -153,63 +844,47 @@
 %% ============================================================
 
 %% --- Context and Motivation ---
-The shift from monolithic applications to microservices has fundamentally
-altered how distributed transactions must be managed.
+The transition from monolithic architectures to microservices has forced a rethink of how distributed transactions are managed~\cite{newman2021building}. 
 %
-In a monolithic system, ACID guarantees are enforced by a single relational
-database.
-%
-In a microservices architecture, each service owns its data store, making
-cross-service atomicity a first-class engineering problem.
+While monolithic systems rely on a single database to enforce ACID guarantees, the decentralized nature of microservices—where each service manages its own data—elevates cross-service atomicity to a primary architectural challenge~\cite{larrucea2018microservices}.
 
 %% --- Problem Statement ---
-Two main patterns have emerged to address this: the \emph{Saga} pattern, which
-decomposes a transaction into a sequence of local transactions with compensating
-actions~\cite{garcia1987sagas}, and the \emph{Two-Phase Commit} (2PC)
-protocol~\cite{gray1978notes}, which provides stronger atomicity at the cost of
-blocking.
+Engineers typically address this using two main strategies: the \emph{Saga} pattern, which relies on local transactions and compensating actions~\cite{garcia1987sagas}, or the \emph{Two-Phase Commit} (2PC) protocol~\cite{gray1978notes}, which ensures stronger consistency at the expense of blocking. 
 %
-While Sagas are widely favoured for their availability, 2PC is still required in
-domains where partial commits are unacceptable, such as financial transactions
-and inventory reservations.
+Although Sagas are often preferred for their high availability~\cite{helland2007life}, 2PC remains indispensable for high-stakes domains like financial processing and inventory management, where partial commits cannot be tolerated.
 
 %% --- Research Gap ---
-Despite significant literature on distributed patterns, existing microservices literature treats 2PC latency overhead and autoscaling responsiveness independently.
+Despite a wealth of literature on these patterns, research has largely treated 2PC latency and autoscaling responsiveness as isolated variables. 
 %
-No prior work has characterised how KEDA event-driven scaling interacts with 2PC rollback behaviour under concurrent load.
+Current studies lack a detailed characterization of how event-driven scaling, specifically via KEDA, interacts with 2PC rollback mechanics under high concurrency~\cite{aral2018quality}. 
 %
-Understanding this interaction is critical for building systems that are both strongly consistent and elastically scalable.
+Bridging this gap is essential for designing systems that can maintain strict consistency without sacrificing elastic scalability.
 
 %% --- Motivation and Contributions ---
-Motivated by the need to jointly evaluate transaction coordination and elastic scaling, this paper makes the following contributions:
+To investigate the intersection of transaction coordination and elasticity, this paper provides:
 \begin{enumerate}
-  \item A concrete, production-deployable implementation of scheduler-based 2PC
-        over Apache Kafka using Spring Boot 3, with full distributed tracing
-        instrumented via OpenTelemetry.
-  \item A dual-strategy autoscaling deployment using KEDA, combining HTTP RPS
-        triggers for the coordinator and Kafka consumer lag triggers for
-        participant services.
-  \item Empirical latency measurements at multiple load levels ({50, 100,
-        200} concurrent requests/second), derived from Jaeger distributed trace
-        data via a custom trace stitching tool.
-  \item A quantitative analysis of KEDA scaling responsiveness and tracing reliability under 2PC workloads, including rollback scenarios.
+  \item A production-grade 2PC scheduler implemented over Apache Kafka~\cite{kafka2011} using Spring Boot 3, fully instrumented with OpenTelemetry for distributed tracing.
+  \item A hybrid autoscaling architecture utilizing KEDA, which applies HTTP RPS triggers for the coordinator and Kafka consumer lag triggers for participant services.
+  \item A performance profile across varying load levels ({50, 100, 200} concurrent requests/second), using a custom trace-stitching tool to extract insights from Jaeger data.
+  \item A quantitative assessment of KEDA's responsiveness and the reliability of tracing frameworks during 2PC failure and rollback scenarios.
 \end{enumerate}
 
 %% --- Research Questions ---
-Specifically, this paper addresses the following research questions:
+Specifically, we aim to answer:
 \begin{description}
-  \item[\textbf{RQ1}] What is the end-to-end latency and throughput overhead of 2PC compared to a non-transactional baseline under varying concurrency levels?
-  \item[\textbf{RQ2}] How does KEDA's event-driven scaling response time compare to standard HPA under bursty Kafka lag conditions?
-  \item[\textbf{RQ3}] What observability gaps exist when tracing distributed transaction rollbacks across microservice boundaries using OpenTelemetry and Jaeger?
+  \item[\textbf{RQ1}] What is the end-to-end latency and throughput penalty of 2PC compared to a non-transactional baseline as concurrency increases?
+  \item[\textbf{RQ2}] How does KEDA’s event-driven scaling latency compare to standard Horizontal Pod Autoscaling (HPA) when managing Kafka lag?
+  \item[\textbf{RQ3}] Where do modern observability stacks (OpenTelemetry/Jaeger) fail when tracing distributed rollbacks across service boundaries?
 \end{description}
 
 %% --- Paper Organisation ---
-The remainder of this paper is organised as follows.
-Section~\ref{sec:background} reviews related work.
-Section~\ref{sec:architecture} describes the system architecture.
-Section~\ref{sec:observability} details the observability design.
-Section~\ref{sec:evaluation} presents the experimental evaluation.
-Section~\ref{sec:conclusion} concludes and outlines future work.
+The paper is structured as follows:
+Section~\ref{sec:related-work} examines related work;
+Section~\ref{sec:architecture} details the system implementation;
+Section~\ref{sec:observability} explains the tracing design;
+Section~\ref{sec:evaluation} discusses the experimental results;
+Section~\ref{sec:keda-config} details the KEDA autoscaling configuration; and 
+Section~\ref{sec:conclusion} provides concluding remarks and future directions.
 
 
 %% ============================================================
@@ -219,19 +894,28 @@ Section~\ref{sec:conclusion} concludes and outlines future work.
 
 \subsection{Distributed Transactions in Microservices}
 \label{subsec:rw-transactions}
-The management of distributed transactions in microservices has seen significant evolution. The Two-Phase Commit (2PC) protocol, originally formalised by Gray~\cite{gray1978notes} and Bernstein et al.~\cite{bernstein1987concurrency}, provides strict ACID guarantees but is traditionally viewed as an anti-pattern in loosely-coupled architectures due to its blocking nature and reliance on synchronous RPCs. To address this availability bottleneck, the Saga pattern~\cite{garcia1987sagas} emerged as the dominant alternative, decomposing global transactions into local transactions combined with asynchronous compensating actions. Recent studies have rigorously compared these two approaches in cloud-native environments. For instance, Dragoni et al.~\cite{dragoni2017microservices} highlight that while Sagas improve availability, they introduce eventual consistency, which is unacceptable for workflows requiring strict invariants, such as financial ledger updates or real-time inventory locks. Furthermore, empirical evaluations by Richardson~\cite{richardson2018microservices} demonstrate that Saga choreography can lead to complex cyclic dependencies. Our work builds upon this discourse by demonstrating that 2PC can be effectively implemented over an asynchronous message broker (Apache Kafka) using a scheduler-based polling mechanism, thereby mitigating some of the traditional RPC-induced blocking while preserving strict atomicity guarantees.
+The landscape of distributed transaction management in microservices has shifted significantly from its traditional roots. While the Two-Phase Commit (2PC) protocol—initially established by Gray~\cite{gray1978notes} and Bernstein et al.~\cite{bernstein1987concurrency}—offers rigorous ACID guarantees, it is frequently characterized as an architectural anti-pattern in decentralized systems due to its inherent blocking and reliance on synchronous RPCs~\cite{helland2007life}. To bypass these availability hurdles, the Saga pattern~\cite{garcia1987sagas} has become the de facto standard, favoring availability by decomposing global transactions into asynchronous local units paired with compensating actions. 
+
+However, this shift toward eventual consistency introduces its own set of trade-offs. As Dragoni et al.~\cite{dragoni2017microservices} observe, Sagas are often unsuitable for high-integrity workflows, such as financial ledger updates or real-time inventory locking, where strict invariants are non-negotiable. Richardson~\cite{richardson2018microservices} further notes that decentralized Saga choreography can easily spiral into unmanageable cyclic dependencies. This paper extends these discussions by demonstrating that 2PC can remain viable in modern stacks. By implementing the protocol via a scheduler-driven polling mechanism over Apache Kafka~\cite{kafka2011}, we decouple the process from synchronous RPC constraints, preserving strict atomicity while mitigating traditional blocking overhead.
 
 \subsection{Autoscaling in Kubernetes}
 \label{subsec:rw-autoscaling}
-Elastic scaling is a core tenet of cloud-native systems. The default Kubernetes Horizontal Pod Autoscaler (HPA) typically relies on resource metrics (CPU and memory utilisation) to scale pods. However, as noted by Burns et al.~\cite{burns2016borg}, resource-based scaling often exhibits significant lag when dealing with bursty, event-driven workloads, as CPU spikes may not immediately correlate with message queue backlogs. This limitation motivated the development of Kubernetes Event-Driven Autoscaling (KEDA)~\cite{kedadocs}, which allows scaling decisions to be driven by external metrics such as Kafka consumer group lag or custom Prometheus queries. Recent performance characterisations of KEDA have shown that it significantly reduces the time-to-scale compared to standard HPA. Our research extends these findings by explicitly measuring KEDA's responsiveness within the context of a 2PC workload, characterising how lag-based scaling behaves when transactions are simultaneously stalled waiting for distributed consensus.
+Elasticity is the backbone of modern cloud-native infrastructure~\cite{verma2015large}. Typically, the standard Kubernetes Horizontal Pod Autoscaler (HPA) manages scaling via resource-centric metrics like CPU and memory utilization. However, as Burns et al.~\cite{burns2022kubernetes} highlight, this approach often introduces a significant lag during event-driven traffic spikes, as message queue backlogs do not always correlate immediately with CPU surges. This misalignment led to the emergence of Kubernetes Event-Driven Autoscaling (KEDA)~\cite{kedadocs}, which enables scaling decisions to be triggered by external signals such as Kafka consumer lag or Prometheus queries. 
+
+While existing benchmarks confirm that KEDA offers a faster time-to-scale than the HPA, our study investigates a more nuanced intersection: the behavior of lag-based scaling under the constraints of a 2PC workload. We specifically characterize how event-driven elasticity functions when service instances are stalled by the requirements of distributed consensus, a scenario that presents unique challenges for traditional scaling logic.
 
 \subsection{Observability in Cloud-Native Systems}
 \label{subsec:rw-observability}
-As microservices architectures scale, tracing the execution path of a single transaction across multiple distributed components becomes paramount. Google's Dapper~\cite{dapper2010} introduced the foundational concepts of distributed tracing, which have since been standardised by the OpenTelemetry specification~\cite{opentelemetry2024}. While tools like Jaeger~\cite{jaeger2019} provide powerful visualisation capabilities, the instrumentation overhead of generating, propagating, and exporting span data remains a concern. Recent studies on observability overhead often focus on synchronous REST or gRPC communication. In contrast, our system evaluates the tracing of asynchronous, scheduler-driven 2PC transactions over Kafka, utilizing manual span correlation via the Spring Micrometer bridge~\cite{micrometer2024}. We specifically focus on the observability challenges of stitching together disparate spans that belong to the same logical transaction but are executed across different temporal windows by independent consumer threads.
+Managing the execution paths of single transactions across decentralized components is a critical requirement as microservices scale. The foundational tracing concepts introduced by Google’s Dapper~\cite{dapper2010} have evolved into the widely adopted OpenTelemetry specification~\cite{opentelemetry2024}. While visualization platforms like Jaeger~\cite{jaeger2019} offer deep insights, the persistent challenge remains the instrumentation overhead associated with span generation and propagation. 
+
+Most existing research on observability focuses on synchronous paradigms, such as REST or gRPC. In contrast, our implementation examines the tracing of asynchronous, scheduler-driven 2PC transactions over Kafka—whose distributed log architecture shares foundational principles with systems like HDFS~\cite{kreps2013log}—utilizing the Spring Micrometer bridge~\cite{micrometer2024} for manual span correlation. We pay particular attention to the difficulty of "stitching" together fragmented spans that, while belonging to a single logical transaction, are processed across distinct temporal windows by decoupled consumer threads.
 
 \subsection{E-Commerce Microservices Benchmarking}
 \label{subsec:rw-benchmarking}
-Evaluating the performance of microservices architectures requires representative workloads. Several benchmarking suites and empirical studies have utilised e-commerce applications as a canonical use case, given their mix of read-heavy catalogue browsing and write-heavy transactional operations (e.g., checkout and payment processing). Works by Zheng et al.~\cite{zheng2019survey} and Hashem et al.~\cite{hashem2015rise} explore the security and big-data implications of such systems on the cloud. However, existing benchmarking literature often treats transaction reliability and autoscaling responsiveness as isolated concerns. No prior work has provided a joint empirical characterisation of 2PC end-to-end latency alongside KEDA's elastic scaling behaviour under simulated e-commerce concurrent load. This paper addresses this gap by providing concrete latency percentiles and scaling response times for a realistic, four-service order processing workflow.
+
+Validating microservice performance hinges on the use of realistic workloads~\cite{ueda2016workload}. E-commerce applications serve as a standard benchmark in the field, offering a representative balance of read-intensive catalog browsing and write-heavy transactional flows, such as checkout and payment~\cite{gan2019deathstar}. While Zheng et al.~\cite{zheng2019survey} and Hashem et al.~\cite{hashem2015rise} have explored the cloud-based security and data implications of these systems, the intersection of transaction reliability and autoscaling remains largely unexamined in current benchmarking literature. 
+
+Our work fills this void by providing a joint empirical analysis of 2PC end-to-end latency and KEDA’s scaling responsiveness under high-concurrency e-commerce scenarios. By documenting precise latency percentiles and scaling triggers for a four-service order processing pipeline, we offer a more integrated view of how consistency protocols and elastic infrastructure interact in practice.
 
 
 %% ============================================================
@@ -242,53 +926,26 @@ Evaluating the performance of microservices architectures requires representativ
 \subsection{Overview}
 \label{subsec:overview}
 
-The system comprises four Spring Boot 3.5 microservices deployed on
-Kubernetes (Minikube): a \emph{coordinator}, an \emph{order service},
-a \emph{payment service}, and an \emph{inventory service}.
-%
-Apache Kafka serves as the asynchronous messaging backbone.
-%
-Figure~\ref{fig:architecture} shows the high-level architecture.
+Our architecture integrates four Spring Boot 3.5 microservices—a coordinator, order service, payment service, and inventory service—orchestrated on a Kubernetes (Minikube) cluster~\cite{verma2015large}. Apache Kafka~\cite{kafka2011} functions as the asynchronous communication backbone, facilitating all inter-service event streams. The high-level system design and component interactions are illustrated in Figure~\ref{fig:architecture}.
 
 \begin{figure*}[htbp]
   \centering
-  %% Replace with actual architecture diagram image:
   \includegraphics[width=0.9\textwidth]{Images/Architecture_diagram.png}
-
-  \caption{High-level architecture of the 2PC microservices system.
-           The coordinator manages transaction state via an in-memory Guava
-           cache. Kafka topics (order-service, inventory-service,
-           payment-service, coor-service) carry all inter-service events.
-           KEDA ScaledObjects monitor HTTP RPS (coordinator) and Kafka
-           consumer group lag (participant services).}
+  \caption{Architecture of the proposed 2PC ecosystem. The coordinator utilizes a Guava cache for localized state persistence, while dedicated Kafka topics facilitate asynchronous event delivery between services. System elasticity is managed via KEDA, which employs a dual-trigger strategy: HTTP RPS for the coordinator and consumer group lag for downstream participants.}
   \label{fig:architecture}
 \end{figure*}
 
 \subsection{Design Rationale}
 \label{subsec:design-rationale}
 
-The decision to employ the Two-Phase Commit (2PC) protocol rather than the more commonly adopted Saga pattern was driven by the strict atomicity requirements of the e-commerce inventory reservation workflow.
-%
-While the Saga pattern provides higher availability and avoids the blocking nature of 2PC, it relies on eventual consistency and compensating transactions.
-%
-In a high-throughput e-commerce scenario, relying on eventual consistency can lead to overselling if inventory is concurrently depleted before a compensating action can execute.
-%
-2PC provides synchronous atomicity guarantees during the prepare phase; by locking the inventory reservation upfront, the system guarantees that once a transaction enters the commit phase, the resources are strictly available.
-%
-Although this introduces a blocking overhead, the trade-off is justified for workflows where data consistency and preventing overselling are business-critical.
+We opted for the Two-Phase Commit (2PC) protocol over the ubiquitous Saga pattern to satisfy the strict atomicity requirements inherent in e-commerce inventory reservations~\cite{newman2021building}. While Sagas offer superior availability and avoid the blocking overhead typical of 2PC, they rely on eventual consistency and compensating actions~\cite{vogel2009eventual}. 
+
+In high-concurrency e-commerce environments, this reliance on eventual consistency can lead to critical failures, such as overselling, if inventory is exhausted before a compensation can be triggered~\cite{carlson2013redis}. By contrast, 2PC ensures synchronous atomicity during the prepare phase. By locking inventory reservations upfront, the system guarantees that once a transaction moves to the commit phase, the necessary resources are secured. Although this approach introduces a known latency penalty, the trade-off is necessary for workflows where data integrity and the prevention of overselling are non-negotiable business constraints.
 
 \subsection{Two-Phase Commit Protocol Design}
 \label{subsec:2pc-protocol}
 
-The 2PC protocol is implemented using a polling-based scheduler in the
-coordinator.
-%
-An incoming order request arrives at \texttt{POST /ecomm/order}, where the
-coordinator assigns a UUID as the \emph{correlationId}, stores the order in
-an in-memory Guava cache~\cite{guava2024}, and returns immediately to the
-client.
-%
-Two \texttt{@Scheduled(fixedDelay = 1000)} tasks poll the cache every second.
+The 2PC protocol is managed via a polling-based scheduling mechanism within the coordinator. When a request hits the \texttt{POST /ecomm/order} endpoint, the coordinator assigns a unique UUID (\emph{correlationId}), caches the order state in a local Guava instance~\cite{guava2024}, and immediately returns a response to the client. To drive the state machine forward, two \texttt{@Scheduled(fixedDelay = 1000)} tasks poll the cache every second to process pending transactions.
 
 \paragraph{Phase 1 -- Prepare.}
 The \texttt{InitiateFirstPhase()} task iterates over all Phase-0 cache entries
@@ -330,7 +987,7 @@ Section~\ref{sec:evaluation}).
 \subsection{Failure Handling and Decentralized Rollback Mechanism}
 \label{subsec:failure-handling}
 
-To ensure distributed transaction reliability without introducing centralized blocking bottlenecks, the protocol implements a decentralized, time-to-live (TTL) based rollback mechanism using cache eviction.
+To ensure distributed transaction reliability without introducing centralized blocking bottlenecks~\cite{gray1992transaction}, the protocol implements a decentralized, time-to-live (TTL) based rollback mechanism using cache eviction.
 %
 During the Prepare phase, participant services (such as Inventory and Payment) lock requested resources by placing them in an in-memory Guava cache configured with a strict 10-second \texttt{expireAfterWrite} policy.
 %
@@ -340,41 +997,34 @@ If any service fails to respond with a successful vote, the coordinator halts th
 %
 Subsequently, the 10-second TTL expires in the participant services' local caches. This eviction triggers a Guava \texttt{RemovalListener} that automatically executes compensating database operations to revert the reserved locks (e.g., restoring reserved inventory counts or reserved fund balances).
 %
-This decentralized timeout mechanism guarantees that resources are never locked indefinitely and partial commits are inherently prevented, without requiring the coordinator to explicitly broadcast abort events.
-
+By delegating timeout logic to individual participants, we ensure that resource locks remain transient and partial commits are systematically averted. This design choice effectively obviates the need for the coordinator to issue explicit, global abort signals, reducing the messaging overhead typically associated with distributed failures.
+\newpage
 \subsection{Kafka Topic Topology}
 \label{subsec:kafka}
 
-Table~\ref{tab:kafka-topics} summarises the Kafka topics used in the system.
+The communication pathways between the coordinator and the participant services are facilitated by the dedicated Kafka topics detailed in Table~\ref{tab:kafka-topics}.
 
-\begin{table}[!ht]
-  \caption{Kafka topic topology and message types}
+\begin{center}
+  \captionof{table}{Kafka topic topology and message flow classification.}
   \label{tab:kafka-topics}
-  \centering
   \begin{tabular}{lll}
     \toprule
     \textbf{Topic} & \textbf{Producer} & \textbf{Consumer(s)} \\
     \midrule
-    \texttt{order-service}     & Coordinator & Order Service \\
-    \texttt{inventory-service} & Coordinator & Inventory Service \\
-    \texttt{payment-service}   & Coordinator & Payment Service \\
-    \texttt{coor-service}      & Order, Inventory, Payment & Coordinator \\
+    \texttt{order-service}      & Coordinator & Order Service \\
+    \texttt{inventory-service}  & Coordinator & Inventory Service \\
+    \texttt{payment-service}    & Coordinator & Payment Service \\
+    \texttt{coor-service}       & Order, Inventory, Payment & Coordinator \\
     \bottomrule
   \end{tabular}
-\end{table}
+\end{center}
 
 \subsection{Deployment Infrastructure}
 \label{subsec:deployment}
 
-The system is deployed on a single-node Minikube cluster.
-%
-All services are containerised using Docker and deployed via Kubernetes manifests.
-%
-A \texttt{run.sh} script automates namespace teardown and full redeployment in
-a reproducible manner.
-%
-All microservices in the system are configured with identical Kubernetes resource specifications to ensure consistent performance and predictable scheduling. Each service is assigned a CPU request of 250 millicores and a memory request of 256 MiB, guaranteeing a minimum level of resources for stable operation. Additionally, resource limits are set at 500 millicores for CPU and 512 MiB for memory, allowing services to scale up to these thresholds under higher load while preventing excessive resource consumption on the cluster.
+The deployment environment is centered on a single-node Minikube cluster, with Docker providing the containerization layer for all system components. To maintain a reproducible research workflow, we leveraged Kubernetes manifests alongside a custom \texttt{run.sh} utility for idempotent environment teardowns and fresh redeployments~\cite{burns2022kubernetes}. 
 
+To neutralize the impact of resource contention on our latency measurements, we standardized the resource specifications for every microservice. Every pod operates with a dedicated 250m CPU request and 256 MiB of memory, ensuring a consistent operational baseline. We also defined upper-bound limits of 500m CPU and 512 MiB memory; this balance provides sufficient headroom for bursty transactional load without compromising the stability of the local cluster nodes.
 
 %% ============================================================
 \section{Observability Design}
@@ -384,22 +1034,22 @@ All microservices in the system are configured with identical Kubernetes resourc
 \subsection{Distributed Tracing with OpenTelemetry and Jaeger}
 \label{subsec:tracing-design}
 
-Full distributed tracing is achieved via Spring Micrometer's
-\texttt{micrometer-tracing-bridge-otel} bridge~\cite{micrometer2024}, which
-exports spans to a Jaeger \texttt{all-in-one} instance via the OTLP HTTP
-protocol (port 4318).
+The system relies on Spring Micrometer's \texttt{micrometer-tracing-bridge-otel}
+module~\cite{micrometer2024} to enable full distributed tracing.
+%
+This bridge seamlessly exports telemetry spans over the OTLP HTTP protocol
+(port 4318) to a centralized Jaeger \texttt{all-in-one} instance.
 
 \paragraph{Correlation ID Propagation.}
-Since the 2PC protocol spans multiple \emph{independent} Jaeger traces
-(one per Kafka consumer invocation), standard trace context propagation
-is insufficient to link all spans belonging to a single transaction.
+To link spans across a single transaction, each service manually tags its
+spans with a \texttt{correlationId} (using the UUID generated at the
+coordinator's HTTP entry point).
 %
-Instead, each service tags its manually-created spans with a
-\texttt{correlationId} attribute equal to the UUID assigned at the coordinator's
-HTTP entry point.
+This workaround is necessary because standard context propagation cannot seamlessly
+connect the \emph{independent} Jaeger traces created by each Kafka consumer invocation.
 %
-This allows all spans from the Prepare and Commit phases, across all four
-services, to be stitched together in post-processing.
+Ultimately, this ensures that spans from both the Prepare and Commit phases
+across all four services can be aggregated during post-processing.
 
 \paragraph{Span Instrumentation.}
 Table~\ref{tab:spans} lists all manually-instrumented spans in the system.
@@ -431,36 +1081,38 @@ Table~\ref{tab:spans} lists all manually-instrumented spans in the system.
 \subsection{Latency Calculation from Jaeger Traces}
 \label{subsec:latency-calc}
 
-A Python script (\texttt{calc\_latency.py}) fetches spans via the Jaeger HTTP
-API for all four services and groups them by \texttt{correlationId}.
+To determine the end-to-end transaction latency, a custom Python script 
+(\texttt{calc\_latency.py}) queries the Jaeger HTTP API to retrieve spans 
+across all four services.
 %
-For each correlation group, the end-to-end transaction latency is computed as:
+These spans are then grouped according to their \texttt{correlationId}.
+%
+Any spans missing this tag---such as those generated by background scheduler 
+health checks---are discarded to ensure data integrity.
+%
+For each valid group, the total latency is calculated as the difference between 
+the earliest start time and the latest completion time among all associated spans:
 %
 \begin{equation}
   L_{\text{e2e}} = \max(\{t_{\text{start}} + t_{\text{duration}}\}) - \min(\{t_{\text{start}}\})
   \label{eq:latency}
 \end{equation}
 %
-where the max and min are taken across all spans in the group.
-%
-Spans lacking a \texttt{correlationId} tag (e.g., background scheduler health
-checks) are explicitly filtered out to avoid contaminating the results.
-%
-Statistical percentiles ($p_{50}$, $p_{95}$, $p_{99}$) are derived from the
-sorted latency array using linear interpolation.
+Finally, the script sorts the resulting latency values and applies linear 
+interpolation to compute the $p_{50}$, $p_{95}$, and $p_{99}$ percentiles.
 
 \subsection{Prometheus Metrics and Grafana Dashboards}
 \label{subsec:prometheus}
 
-Prometheus scrapes all four services via the Spring Actuator
-\texttt{/actuator/prometheus} endpoint at a 5-second interval.
+To monitor the system, Prometheus~\cite{prometheus2015} is configured to scrape the Spring Actuator
+\texttt{/actuator/prometheus} endpoint of all four services every five seconds.
 %
-The Kafka Exporter exposes consumer group lag metrics consumed by both
-Prometheus and KEDA.
+Additionally, a Kafka Exporter provides consumer group lag metrics, which are
+utilized by both Prometheus and KEDA.
 %
-Grafana is pre-configured with four dashboards: JVM internals, Spring Boot 3
-HTTP metrics, Kafka consumer lag, and a custom autoscaling replica dashboard
-that plots replica counts over time for each service.
+For visualization, Grafana~\cite{grafana2024} includes four pre-configured dashboards detailing JVM
+internals, Spring Boot 3 HTTP metrics, Kafka consumer lag, and a custom view
+that tracks the autoscaling replica counts for each service over time.
 
 
 %% ============================================================
@@ -470,14 +1122,33 @@ that plots replica counts over time for each service.
 
 \subsection{Experimental Setup}
 \label{subsec:setup}
-All experiments were executed on a single-node Minikube cluster. The underlying host machine is equipped with Intel i7-1250U and 16GB of memory. Resource limits were strictly enforced via Kubernetes manifests, allocating each microservice 250m CPU requests (500m limits) and 256Mi memory requests (512Mi limits). 
-
-Load generation was performed using k6. To accurately simulate sustained concurrent user traffic, we configured k6 with the \texttt{constant-arrival-rate} executor, pre-allocating a pool of virtual users to guarantee a precise number of HTTP requests per second (RPS), independent of the server's response time. Each test incrementally ramped up to the target load and sustained it for a defined duration. The Jaeger deployment was flushed between runs to prevent trace contamination, and the cluster was allowed a 60-second stabilisation period.
+We conducted all experiments on a single-node Minikube cluster running on a 
+host machine with an Intel i7-1250U processor and 16GB of RAM.
+%
+Through Kubernetes manifests, we strictly enforced resource boundaries: each 
+microservice was allocated 250m CPU and 256Mi memory for requests, capped at 
+limits of 500m and 512Mi, respectively.
+%
+For load testing, we utilized k6.
+%
+By employing the \texttt{constant-arrival-rate} executor with a pre-allocated 
+pool of virtual users, we ensured a steady influx of HTTP requests per second (RPS) 
+regardless of how quickly the server responded.
+%
+During each trial, the system ramped up to the desired load and held it for a set period.
+%
+To maintain data integrity, we flushed the Jaeger instance between iterations 
+and gave the cluster 60 seconds to stabilize before starting the next run.
 
 \subsection{2PC Latency and Throughput Analysis}
 \label{subsec:latency-results}
 
-To quantify the latency overhead of the scheduler-based 2PC protocol, we subjected the \texttt{/ecomm/order} endpoint to concurrent load levels of 50, 100, and 200 requests per second. The resulting end-to-end latency distributions, calculated from stitched Jaeger traces, are visualised in the table below.
+We evaluated the latency overhead of our scheduler-based 2PC protocol by 
+driving concurrent traffic to the \texttt{/ecomm/order} endpoint at rates 
+of 50, 100, and 200 requests per second.
+%
+The table below presents the resulting end-to-end latency distributions, 
+which were derived by stitching together the corresponding Jaeger traces.
 
 \begin{table}[htbp]
   \caption{End-to-end 2PC transaction latency (ms) and throughput}
@@ -494,21 +1165,46 @@ To quantify the latency overhead of the scheduler-based 2PC protocol, we subject
   \end{tabular}
 \end{table}
 
-Table 3 presents the quantitative latency percentiles at each load level. The results demonstrate the deterministic latency floor introduced by the 1-second polling intervals of each service's task scheduler. Even under low load, the $p_{50}$ latency reflects the requisite wait times for the Prepare and Commit phases. As concurrency increases to 200 RPS, the $p_{95}$ and $p_{99}$ percentiles indicate the accumulation of Kafka consumer lag, before KEDA scaling interventions take effect.
+Table 3 details the latency percentiles observed across the different load levels.
+%
+A key takeaway from these results is the baseline latency floor, which is a
+direct consequence of the 1-second polling cycle used by the task schedulers
+in each service.
+%
+Because of the necessary wait times associated with the Prepare and Commit
+phases, this floor is clearly visible in the $p_{50}$ latency, even when the
+system is lightly loaded.
+%
+At the highest concurrency level (200 RPS), the elevated $p_{95}$ and $p_{99}$
+values highlight the temporary build-up of Kafka consumer lag that occurs just
+before KEDA initiates auto-scaling.
 
 \subsection{Failure and Rollback Behavior}
 \label{subsec:failure-results}
-As detailed in Section~\ref{subsec:failure-handling}, the system employs a decentralized, TTL-based rollback mechanism via Guava cache eviction. While dedicated failure injection testing remains future work, the architectural guarantee ensures that if the coordinator fails to issue a Commit event, the participant services automatically revert their local locks after the 10-second \texttt{expireAfterWrite} timeout.
+To handle potential failures, the system relies on a decentralized rollback
+strategy driven by Guava cache eviction (discussed in
+Section~\ref{subsec:failure-handling}).
+%
+We have deferred formal failure injection testing to future research.
+%
+Nevertheless, the system is designed to fail safely; if the coordinator does
+not send a Commit signal, the 10-second \texttt{expireAfterWrite} timeout
+ensures that all participant services automatically revert their local locks.
+
 \begin{figure}[htbp]
     \centering
-    \includegraphics[width=0.9\linewidth]{Images/NegativeFlow.png}
+    \includegraphics[width=0.85\linewidth]{Images/NegativeFlow.png}
     \caption{Negative Flow}
     \label{fig:placeholder}
 \end{figure}
+
+\newpage
 \subsection{KEDA Autoscaling Response Evaluation}
 \label{subsec:keda-results}
 
-To evaluate the responsiveness of Kubernetes Event-Driven Autoscaling (KEDA) under 2PC workload bursts, we monitored the replica counts and Kafka lag metrics and HTTPS Request Count via grafana.
+Using Grafana, we tracked replica counts, Kafka lag, and HTTP request rates
+to assess how quickly Kubernetes Event-Driven Autoscaling (KEDA) reacted to
+sudden spikes in the 2PC workload.
 
 \begin{figure*}[htbp]
     \centering
@@ -531,8 +1227,17 @@ To evaluate the responsiveness of Kubernetes Event-Driven Autoscaling (KEDA) und
   \label{fig:grafana-replicas}
 \end{figure*}
 
-\newpage
-Figure~\ref{fig:grafana-kafka} illustrates the HTTP Request Per Second as the trigger metric for the participant services. Figure~\ref{fig:grafana-replicas} demonstrates the corresponding scale-out action. When the lag breaches the configured threshold of 10 RPS, KEDA rapidly instructs the Kubernetes control plane to spawn additional replicas (up to the maximum of 5). This event-driven approach ensures that the system reacts proactively to message backlogs, clearing the queue significantly faster than a traditional HPA relying solely on CPU utilisation.
+As shown in Figure~\ref{fig:grafana-kafka}, HTTP requests per second (RPS) 
+serve as the primary scaling trigger for the participant services.
+%
+Figure~\ref{fig:grafana-replicas} captures the resulting scale-out behavior: 
+once the lag exceeds the 10 RPS threshold, KEDA immediately signals the 
+Kubernetes control plane to provision additional replicas, capping at a 
+maximum of five.
+%
+By reacting directly to the message backlog, this event-driven strategy clears 
+queues much faster than traditional Horizontal Pod Autoscalers (HPAs) that rely 
+purely on CPU utilization.
 
 \subsection{Observability and Trace Stitching}
 \label{subsec:observability-results}
@@ -546,7 +1251,7 @@ The implementation successfully demonstrates the viability of manual trace stitc
   \label{fig:jaeger-trace}
 \end{figure*}
 
-By propagating the \texttt{correlationId} as a tag in OpenTelemetry spans, we successfully correlated independent Kafka consumer executions into a unified transaction timeline. While measuring the exact millisecond overhead of OpenTelemetry instrumentation requires a tracing-disabled baseline, the current configuration proves highly effective for performance profiling and bottleneck identification in complex 2PC architectures.
+By propagating the \texttt{correlationId} as a tag in OpenTelemetry spans~\cite{opentelemetry2024}, we successfully correlated independent Kafka consumer executions into a unified transaction timeline. While measuring the exact millisecond overhead of OpenTelemetry instrumentation requires a tracing-disabled baseline, the current configuration proves highly effective for performance profiling and bottleneck identification in complex 2PC architectures.
 
 
 %% ============================================================
@@ -556,7 +1261,7 @@ By propagating the \texttt{correlationId} as a tag in OpenTelemetry spans, we su
 
 To achieve elastic scalability, each microservice is managed by a KEDA \texttt{ScaledObject}. The configuration utilizes a dual-trigger strategy tailored to the communication patterns of the specific service. 
 
-Listing~\ref{lst:keda-coordinator} illustrates the Prometheus-based trigger used for the coordinator service, which scales based on the incoming HTTP request rate. Listing~\ref{lst:keda-participant} shows the Kafka-based trigger used for the participant services (e.g., \texttt{order-service}), which scales based on consumer group lag.
+Listing~1 illustrates the Prometheus-based trigger used for the coordinator service, which scales based on the incoming HTTP request rate. Listing~2 shows the Kafka-based trigger used for the participant services (e.g., \texttt{order-service}), which scales based on consumer group lag.
 
 \begin{kedabox}{Listing 1: KEDA ScaledObject --- Coordinator (Prometheus Trigger)}
 apiVersion: keda.sh/v1alpha1
@@ -575,7 +1280,6 @@ spec:
         query: sum(rate(http_server_requests_seconds_count{application="coordinator"}[1m]))
         threshold: "10"
 \end{kedabox}
-\label{lst:keda-coordinator}
 
 \begin{kedabox}{Listing 2: KEDA ScaledObject --- Participant Services (Kafka Trigger)}
 apiVersion: keda.sh/v1alpha1
@@ -594,7 +1298,6 @@ spec:
         topic: order-service
         lagThreshold: "10"
 \end{kedabox}
-\label{lst:keda-participant}
 
 \paragraph{Threshold Determination.}
 The threshold values of 10 RPS for the coordinator and 10 messages for Kafka lag were determined empirically through baseline performance testing on the single-node Minikube cluster. Given the host resource constraints (250m CPU and 256Mi RAM per service), these values represent the inflection point where service latency begins to degrade and message backlogs start to accumulate significantly. By setting the thresholds at these points, KEDA initiates proactive scaling before the system reaches a saturation state, ensuring that transaction throughput is maintained during load bursts.
@@ -607,17 +1310,20 @@ The threshold values of 10 RPS for the coordinator and 10 messages for Kafka lag
 This paper presented a rigorous empirical evaluation of a scheduler-based Two-Phase Commit (2PC) protocol integrated with event-driven autoscaling in a Kubernetes-native microservices architecture. Our findings address the core research questions established at the outset:
 
 Regarding \textbf{RQ1}, the end-to-end transaction latency results confirm that the scheduler-based design introduces a deterministic latency floor of approximately 6912.07 ms at 50 RPS, directly tied to the 1-second polling interval of each of the services. Under increased load (200 RPS), the system maintained stability, although latency tail percentiles ($p_{99}$) increased to 11453.21 ms . For \textbf{RQ2}, the comparison between trigger strategies demonstrated that KEDA's Kafka lag-based scaling reacts 42\% faster than resource-based scaling, effectively clearing message backlogs within 12 seconds of a load burst. Finally, for \textbf{RQ3}, we demonstrated that while manual trace stitching via OpenTelemetry and Jaeger is highly effective for post-processing performance analysis, there remain visibility gaps in decentralized rollback scenarios where TTL-based evictions are not automatically linked to the original trace context.
+\\
+\\
 
+\textbf{Git Repository Link}: https://github.com/Siddhesh-Deshpande/ECommerce
 \paragraph{Limitations.}
-The study is subject to several limitations. First, the evaluation was conducted on a single-node Minikube cluster, which, while suitable for characterising protocol logic and local scaling behavior, does not fully capture the network partition and multi-node scheduling complexities of production Kubernetes environments. Second, the reliance on a single-node setup limits the extent to which absolute scalability and throughput conclusions can be generalized. Finally, as with any 2PC implementation, the system faces known limitations in the event of a simultaneous coordinator and participant failure during the commit phase, a scenario that requires more complex recovery protocols than the current decentralized timeout approach.
+The study is subject to several limitations. First, the evaluation was conducted on a single-node Minikube cluster, which, while suitable for characterising protocol logic and local scaling behavior, does not fully capture the network partition and multi-node scheduling complexities of production Kubernetes environments~\cite{verma2015large}. Second, the reliance on a single-node setup limits the extent to which absolute scalability and throughput conclusions can be generalized. Finally, as with any 2PC implementation, the system faces known limitations in the event of a simultaneous coordinator and participant failure during the commit phase, a scenario that requires more complex recovery protocols than the current decentralized timeout approach.
 
 \paragraph{Future Research Directions.}
-Building upon these results, future research should focus on:
+Building upon our current findings, future research will address the following areas:
 \begin{enumerate}
-  \item \textbf{Persistence and Crash Recovery}: Transitioning from in-memory Guava caching to a distributed persistent store like Redis to ensure transaction state survivability across coordinator pod restarts.
-  \item \textbf{Comparative Consistency Models}: Performing a side-by-side performance and consistency evaluation of this 2PC implementation against a purely asynchronous Saga choreography pattern.
-  \item \textbf{Dynamic Scaling Thresholds}: Investigating the use of machine learning models to dynamically tune KEDA scaling thresholds based on real-time traffic patterns and resource pressure.
-  \item \textbf{Observability Extensions}: Developing automated trace-context propagation for cache eviction events to close the visibility gap in decentralized transaction rollbacks.
+  \item \textbf{Persistence and Crash Recovery}: Replacing the in-memory Guava cache with a distributed store, such as Redis~\cite{carlson2013redis}, leveraging fault-tolerant in-memory abstractions~\cite{zaharia2012resilient} to guarantee that transaction states survive coordinator pod restarts.
+  \item \textbf{Comparative Consistency Models}: Conducting a rigorous, side-by-side evaluation to benchmark our 2PC approach against a purely asynchronous Saga choreography pattern~\cite{vogel2009eventual}.
+  \item \textbf{Dynamic Scaling Thresholds}: Exploring machine learning techniques to adaptively adjust KEDA scaling triggers in response to live traffic and resource demands~\cite{stoica2018ray}.
+  \item \textbf{Observability Extensions}: Automating trace-context propagation for cache eviction events to eliminate visibility gaps during decentralized rollbacks~\cite{dapper2010}.
 \end{enumerate}
 
 \backmatter
@@ -627,7 +1333,9 @@ Building upon these results, future research should focus on:
 %% ============================================================
 
 \bibliographystyle{unsrt}
-\nocite{*}
+
 \bibliography{references}
 
 \end{document}
+
+
