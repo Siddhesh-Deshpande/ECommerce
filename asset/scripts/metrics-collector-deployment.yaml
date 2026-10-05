@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-metrics-collector
+  namespace: ecomm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: load-metrics-collector
+  template:
+    metadata:
+      labels:
+        app: load-metrics-collector
+    spec:
+      serviceAccountName: load-metrics-collector
+      containers:
+        - name: collector
+          image: load-metrics-collector:latest
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

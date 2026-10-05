@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topic-partitions
+  namespace: ecomm
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app: kafka-topic-partitions
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: configure-topics
+          image: apache/kafka:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              kafka_topics=/opt/kafka/bin/kafka-topics.sh
+              bootstrap=kafka-service.ecomm.svc.cluster.local:9092
+              for topic in coor-service order-service payment-service inventory-service; do
+                description="$("$kafka_topics" --bootstrap-server "$bootstrap" --describe --topic "$topic" 2>/dev/null || true)"
+                partitions="$(printf '%s\n' "$description" | sed -n 's/.*PartitionCount: \([0-9][0-9]*\).*/\1/p' | head -n 1)"
+                if [ -z "$partitions" ]; then
+                  echo "Creating $topic with 5 partitions"
+                  "$kafka_topics" --bootstrap-server "$bootstrap" --create --if-not-exists --topic "$topic" --partitions 5 --replication-factor 1
+                elif [ "$partitions" -lt 5 ]; then
+                  echo "Increasing $topic from $partitions to 5 partitions"
+                  "$kafka_topics" --bootstrap-server "$bootstrap" --alter --topic "$topic" --partitions 5
+                else
+                  echo "$topic already has $partitions partitions; leaving it unchanged"
+                fi
+              done

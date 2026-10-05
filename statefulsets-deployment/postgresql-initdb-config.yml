@@ -12,6 +12,7 @@ data:
     CREATE DATABASE order_db;
     CREATE DATABASE inventory_db;
     CREATE DATABASE user_db;
+    CREATE DATABASE coordinator_db;
 
     -- =========================
     -- PAYMENT DB
@@ -28,20 +29,21 @@ data:
                                       amount INT
     );
 
-    -- Insert users data (given + some random)
+    -- Large deterministic balances for the load-test users (IDs 1-12).
+    -- The load test rotates across all seeded items, including $10 and $20 items.
     INSERT INTO users (user_id, balance) VALUES
-                                             (1, 100000),
-                                             (2, 100000),
-                                             (3, 100000),
-                                             (4, 100000),
-                                             (5, 100000),
-                                             (6, 100000),
-                                             (7, 100000),
-                                             (8, 100000),
-                                             (9, 100000),
-                                             (10, 100000),
-                                             (11, 100000),
-                                             (12, 100000);
+                                             (1, 100000000),
+                                             (2, 100000000),
+                                             (3, 100000000),
+                                             (4, 100000000),
+                                             (5, 100000000),
+                                             (6, 100000000),
+                                             (7, 100000000),
+                                             (8, 100000000),
+                                             (9, 100000000),
+                                             (10, 100000000),
+                                             (11, 100000000),
+                                             (12, 100000000);
 
     -- =========================
     -- ORDER DB
@@ -54,7 +56,8 @@ data:
                             itemsids INT[],
                             quantity INT[],
                             amount INT,
-                            status VARCHAR(50)
+                            status VARCHAR(50),
+                            correlation_id VARCHAR(36) UNIQUE
     );
 
     -- =========================
@@ -74,19 +77,20 @@ data:
                                     reserved_quantity INT
     );
 
-    -- Insert items data (given + some extra)
+    -- Generous stock supports repeated full load runs while the load script
+    -- rotates purchases evenly across these seeded items.
     INSERT INTO items (item_id, name, quantity, price) VALUES
-                                                           (1, 'laptop', 100000, 10),
-                                                           (2, 'phone', 100000, 10),
-                                                           (3, 'headphones', 100000, 10),
-                                                           (4, 'keyboard', 100000, 10),
-                                                           (5, 'mouse', 100000, 10),
-                                                           (6, 'monitor', 100000, 10),
-                                                           (7, 'printer', 100000, 20),
-                                                           (8, 'cable', 100000, 20),
-                                                           (9, 'drive', 100000, 20),
-                                                           (10, 'webcam', 100000, 20),
-                                                           (11, 'tablet', 100000, 20),
-                                                           (12, 'speaker', 100000, 20);
+                                                           (1, 'laptop', 1000000, 10),
+                                                           (2, 'phone', 1000000, 10),
+                                                           (3, 'headphones', 1000000, 10),
+                                                           (4, 'keyboard', 1000000, 10),
+                                                           (5, 'mouse', 1000000, 10),
+                                                           (6, 'monitor', 1000000, 10),
+                                                           (7, 'printer', 1000000, 20),
+                                                           (8, 'cable', 1000000, 20),
+                                                           (9, 'drive', 1000000, 20),
+                                                           (10, 'webcam', 1000000, 20),
+                                                           (11, 'tablet', 1000000, 20),
+                                                           (12, 'speaker', 1000000, 20);
 
     -- Reserved items table (no insert as requested)

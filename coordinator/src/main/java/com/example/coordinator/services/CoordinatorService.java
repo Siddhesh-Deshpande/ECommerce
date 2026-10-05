@@ -1,113 +1,48 @@
-//package com.example.coordinator.services;
-//
-//import com.example.coordinator.entity.Order;
-//import com.example.events.dtos.InventoryResponse;
-//import com.example.events.dtos.OrderResponse;
-//import com.example.events.dtos.PaymentResponse;
-//import org.springframework.beans.factory.annotation.Autowired;
-//import org.springframework.kafka.annotation.KafkaHandler;
-//import org.springframework.kafka.annotation.KafkaListener;
-//import org.springframework.stereotype.Service;
-//import com.google.common.cache.Cache;
-//
-//@Service
-//@KafkaListener(topics="coor-service")
-//public class CoordinatorService {
-//    private Cache<String, Order> guavaCache;
-//
-//    @Autowired
-//    public CoordinatorService(Cache<String, Order> guavaCache) {
-//        this.guavaCache = guavaCache;
-//    }
-//    @KafkaHandler
-//    public void OrderListener(OrderResponse response)
-//    {
-//        if(guavaCache.asMap().containsKey(response.getCorrelationId()))
-//        {
-//            System.out.println("Order Response Recieved from order service");
-//            guavaCache.asMap().get(response.getCorrelationId()).setOrder_id(response.getId());
-//            guavaCache.asMap().get(response.getCorrelationId()).getResponses().put(0,response.getStatus());
-//        }
-//    }
-//    @KafkaHandler
-//    public void InventoryListener(InventoryResponse response)
-//    {
-//        if(guavaCache.asMap().containsKey(response.getCorrelationId()))
-//        {
-//            System.out.println("Inventory Response Recieved from inventory service");
-//            guavaCache.asMap().get(response.getCorrelationId()).getResponses().put(1,response.getStatus());
-//        }
-//    }
-//    @KafkaHandler
-//    public void PaymentListener(PaymentResponse response)
-//    {
-//        if(guavaCache.asMap().containsKey(response.getCorrelationId()))
-//        {
-//            System.out.println("Payment Response Recieved from payment service");
-//            guavaCache.asMap().get(response.getCorrelationId()).getResponses().put(2,response.getStatus());
-//        }
-//    }
-//
-//
-//}
 package com.example.coordinator.services;
 
-import com.example.coordinator.entity.Order;
 import com.example.events.dtos.InventoryResponse;
 import com.example.events.dtos.OrderResponse;
 import com.example.events.dtos.PaymentResponse;
-import org.springframework.beans.factory.annotation.Autowired;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import org.springframework.kafka.annotation.KafkaHandler;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
-import com.google.common.cache.Cache;
-import io.micrometer.tracing.Span;
-import io.micrometer.tracing.Tracer;
 
 @Service
-@KafkaListener(topics="coor-service")
+@KafkaListener(topics = "coor-service")
 public class CoordinatorService {
-    private final Cache<String, Order> guavaCache;
+    private final CoordinatorWorkflowService workflowService;
+    private final Tracer tracer;
 
-    @Autowired
-    private Tracer tracer; // Manually injected to bridge the trace
-
-    @Autowired
-    public CoordinatorService(Cache<String, Order> guavaCache) {
-        this.guavaCache = guavaCache;
+    public CoordinatorService(CoordinatorWorkflowService workflowService, Tracer tracer) {
+        this.workflowService = workflowService;
+        this.tracer = tracer;
     }
 
     @KafkaHandler
-    public void OrderListener(OrderResponse response) {
-        processResponse(response.getCorrelationId(), "Order-Service", 0, response.getStatus(), response.getId());
+    public void receiveOrderResult(OrderResponse response) {
+        receive(response.getCorrelationId(), "order", response.getStatus(), response.getId(), response.getStage());
     }
 
     @KafkaHandler
-    public void InventoryListener(InventoryResponse response) {
-        processResponse(response.getCorrelationId(), "Inventory-Service", 1, response.getStatus(), null);
+    public void receiveInventoryResult(InventoryResponse response) {
+        receive(response.getCorrelationId(), "inventory", response.getStatus(), null, response.getStage());
     }
 
     @KafkaHandler
-    public void PaymentListener(PaymentResponse response) {
-        processResponse(response.getCorrelationId(), "Payment-Service", 2, response.getStatus(), null);
+    public void receivePaymentResult(PaymentResponse response) {
+        receive(response.getCorrelationId(), "payment", response.getStatus(), null, response.getStage());
     }
 
-    // Helper to wrap the logic in a Manual Span
-    private void processResponse(String cid, String serviceName, int responseIndex, boolean status, Integer orderId) {
-        Span newSpan = this.tracer.nextSpan().name("receive-" + serviceName.toLowerCase());
-        try (Tracer.SpanInScope ws = this.tracer.withSpan(newSpan.start())) {
-            newSpan.tag("correlationId", cid);
-            newSpan.tag("participant", serviceName);
-
-            if (guavaCache.asMap().containsKey(cid)) {
-                System.out.println(serviceName + " Response Received");
-                Order order = guavaCache.asMap().get(cid);
-
-                if (orderId != null) order.setOrder_id(orderId);
-                order.getResponses().put(responseIndex, status);
-            }
+    private void receive(String correlationId, String participant, boolean success, Integer orderId, String stage) {
+        Span span = tracer.nextSpan().name("receive-" + participant + "-" + (stage == null ? "prepare" : stage.toLowerCase()));
+        try (Tracer.SpanInScope ignored = tracer.withSpan(span.start())) {
+            span.tag("correlationId", correlationId);
+            span.tag("participant", participant);
+            workflowService.recordParticipantResult(correlationId, participant, success, orderId, stage);
         } finally {
-            newSpan.end();
+            span.end();
         }
     }
 }

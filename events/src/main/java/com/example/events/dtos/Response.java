@@ -7,11 +7,16 @@ public abstract class Response {
     String eventype;
     Instant timestamp;
     boolean status;
+    String stage;
     public Response(String correlationId,String eventype, boolean status) {
+        this(correlationId, eventype, status, "PREPARE");
+    }
+    public Response(String correlationId, String eventype, boolean status, String stage) {
         this.correlationId = correlationId;
         this.eventype = eventype;
         this.timestamp = Instant.now();
         this.status = status;
+        this.stage = stage;
 
     }
     public Response() {}
@@ -45,6 +50,14 @@ public abstract class Response {
 
     public void setTimestamp(Instant timestamp) {
         this.timestamp = timestamp;
+    }
+
+    public String getStage() {
+        return stage;
+    }
+
+    public void setStage(String stage) {
+        this.stage = stage;
     }
 
 }

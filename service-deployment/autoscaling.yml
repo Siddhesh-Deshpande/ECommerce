@@ -6,15 +6,47 @@ metadata:
 spec:
   scaleTargetRef:
     name: coordinator-deployment
+  pollingInterval: 10
   minReplicaCount: 1
-  maxReplicaCount: 5
+  # Minikube currently has 8 GiB / 6 vCPU. Raise to 5 only after the
+  # end-to-end run shows the node and shared PostgreSQL can sustain it.
+  maxReplicaCount: 3
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 30
+        scaleDown:
+          stabilizationWindowSeconds: 180
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
   triggers:
+    # Scale the synchronous submission path by observed POST rate. The target
+    # of 8 is provisional and must be retained only if the balanced load run
+    # confirms this per-replica rate meets the p95 SLO.
     - type: prometheus
+      metricType: AverageValue
       metadata:
         serverAddress: http://prometheus-service.ecomm.svc.cluster.local:9090
-        metricName: http_server_requests_seconds_count_rate
-        query: sum(rate(http_server_requests_seconds_count{application="coordinator"}[1m]))
-        threshold: "10" # Scale up if coordinator receives > 10 RPS
+        metricName: coordinator_order_submission_rps
+        query: sum(rate(http_server_requests_seconds_count{application="coordinator",method="POST",uri="/ecomm/order"}[1m]))
+        threshold: "8"
+    # The same Coordinator replicas also consume participant votes and
+    # decision acknowledgments, so scale on their response-topic backlog too.
+    - type: kafka
+      metricType: AverageValue
+      metadata:
+        bootstrapServers: kafka-service.ecomm.svc.cluster.local:9092
+        consumerGroup: coordinator-service-group
+        topic: coor-service
+        lagThreshold: "10"
+        limitToPartitionsWithLag: "true"
 ---
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
@@ -24,15 +56,37 @@ metadata:
 spec:
   scaleTargetRef:
     name: order-deployment
+  pollingInterval: 10
   minReplicaCount: 1
-  maxReplicaCount: 5
+  maxReplicaCount: 3
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 30
+        scaleDown:
+          stabilizationWindowSeconds: 180
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
   triggers:
+    # Do not scale Order from synthetic status-poll GETs. Its Kafka consumer is
+    # the intended scaling signal for this experiment; status traffic remains
+    # observable separately and can get its own target after the load driver
+    # stops polling repeatedly.
     - type: kafka
+      metricType: AverageValue
       metadata:
         bootstrapServers: kafka-service.ecomm.svc.cluster.local:9092
         consumerGroup: order-service-group
         topic: order-service
-        lagThreshold: "10" # Scale up if lag exceeds 10 messages
+        lagThreshold: "10"
+        limitToPartitionsWithLag: "true"
 ---
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
@@ -42,15 +96,33 @@ metadata:
 spec:
   scaleTargetRef:
     name: payment-deployment
+  pollingInterval: 10
   minReplicaCount: 1
-  maxReplicaCount: 5
+  maxReplicaCount: 3
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 30
+        scaleDown:
+          stabilizationWindowSeconds: 180
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
   triggers:
     - type: kafka
+      metricType: AverageValue
       metadata:
         bootstrapServers: kafka-service.ecomm.svc.cluster.local:9092
         consumerGroup: payment-service-group
         topic: payment-service
         lagThreshold: "10"
+        limitToPartitionsWithLag: "true"
 ---
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
@@ -60,12 +132,30 @@ metadata:
 spec:
   scaleTargetRef:
     name: inventory-deployment
+  pollingInterval: 10
   minReplicaCount: 1
-  maxReplicaCount: 5
+  maxReplicaCount: 3
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Pods
+              value: 2
+              periodSeconds: 30
+        scaleDown:
+          stabilizationWindowSeconds: 180
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
   triggers:
     - type: kafka
+      metricType: AverageValue
       metadata:
         bootstrapServers: kafka-service.ecomm.svc.cluster.local:9092
         consumerGroup: inventory-service-group
         topic: inventory-service
         lagThreshold: "10"
+        limitToPartitionsWithLag: "true"

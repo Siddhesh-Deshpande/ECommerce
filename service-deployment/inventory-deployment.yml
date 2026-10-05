@@ -5,7 +5,6 @@ metadata:
   labels:
     app: inventory
 spec:
-  replicas: 1
   selector:
     matchLabels:
       app: inventory
@@ -20,7 +19,35 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: 8082
+              name: http
+            - containerPort: 8085
+              name: management
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8085
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8085
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8085
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
           env:
+            - name: MANAGEMENT_SERVER_PORT
+              value: "8085"
+            - name: MANAGEMENT_SERVER_ADDRESS
+              value: "0.0.0.0"
             - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
               value: "kafka-service.ecomm.svc.cluster.local:9092"
             - name: MANAGEMENT_OTLP_TRACING_ENDPOINT

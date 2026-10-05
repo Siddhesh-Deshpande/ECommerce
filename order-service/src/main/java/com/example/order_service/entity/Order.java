@@ -36,7 +36,15 @@ public class Order {
     @Column(name="status")
     private String status;
 
+    @Column(name = "correlation_id", unique = true, updatable = false, length = 36)
+    private String correlationId;
+
     public Order(Integer clientId, Integer[] itemsids,Integer[] quantity,Integer amount) {
+        this(null, clientId, itemsids, quantity, amount);
+    }
+
+    public Order(String correlationId, Integer clientId, Integer[] itemsids, Integer[] quantity, Integer amount) {
+        this.correlationId = correlationId;
         this.clientId = clientId;
         this.itemsids = itemsids;
         this.amount = amount;

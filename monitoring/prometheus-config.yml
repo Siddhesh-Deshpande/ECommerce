@@ -9,33 +9,42 @@ data:
       scrape_interval: 5s
 
     scrape_configs:
-      - job_name: 'coordinator'
+      # Scrape each running service pod directly. Scraping a ClusterIP Service
+      # creates only one Prometheus target and can miss counters on scaled pods.
+      - job_name: 'spring-services'
         metrics_path: '/actuator/prometheus'
-        static_configs:
-          - targets: ['coordinator-service.ecomm.svc.cluster.local:80']
-            labels:
-              application: 'coordinator'
-
-      - job_name: 'order-service'
-        metrics_path: '/actuator/prometheus'
-        static_configs:
-          - targets: ['order-service.ecomm.svc.cluster.local:80']
-            labels:
-              application: 'order-service'
-
-      - job_name: 'payment-service'
-        metrics_path: '/actuator/prometheus'
-        static_configs:
-          - targets: ['payment-service.ecomm.svc.cluster.local:80']
-            labels:
-              application: 'payment-service'
-
-      - job_name: 'inventory-service'
-        metrics_path: '/actuator/prometheus'
-        static_configs:
-          - targets: ['inventory-service.ecomm.svc.cluster.local:80']
-            labels:
-              application: 'inventory-service'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: ['ecomm']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_phase]
+            action: keep
+            regex: Running
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: 'coordinator|order|payment|inventory'
+          - source_labels: [__meta_kubernetes_pod_container_port_number]
+            action: keep
+            regex: '8085'
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: application
+            regex: coordinator
+            replacement: coordinator
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: application
+            regex: order
+            replacement: order-service
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: application
+            regex: inventory
+            replacement: inventory-service
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: application
+            regex: payment
+            replacement: payment-service
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
 
       - job_name: 'kafka-exporter'
         static_configs:

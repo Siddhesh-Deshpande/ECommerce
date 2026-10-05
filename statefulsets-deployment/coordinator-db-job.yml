@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ensure-coordinator-db
+  namespace: ecomm
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app: ensure-coordinator-db
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ensure-database
+          image: postgres:15
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: password
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              psql --host=postgres-service.ecomm.svc.cluster.local --dbname=postgres --tuples-only --no-align \
+                --command="SELECT 1 FROM pg_database WHERE datname = 'coordinator_db'" | grep -q 1 && {
+                  echo "coordinator_db already exists"
+                } || {
+                  psql --host=postgres-service.ecomm.svc.cluster.local --dbname=postgres \
+                    --set=ON_ERROR_STOP=1 --command="CREATE DATABASE coordinator_db"
+                }

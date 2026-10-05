@@ -8,6 +8,10 @@ public class OrderResponse extends Response {
         super(correlationId,OrderResponse.class.getSimpleName() ,status);
         this.id = id;
     }
+    public OrderResponse(String correlationId, boolean status, Integer id, String stage) {
+        super(correlationId, OrderResponse.class.getSimpleName(), status, stage);
+        this.id = id;
+    }
     public OrderResponse(){}
 
     public Integer getId() {
