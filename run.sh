@@ -20,6 +20,8 @@ LOAD_TEST_USER_IDS="${LOAD_TEST_USER_IDS:-1,2,3,4,5,6,7,8,9,10,11,12}"
 LOAD_TEST_ITEM_IDS="${LOAD_TEST_ITEM_IDS:-1,2,3,4,5,6,7,8,9,10,11,12}"
 LOAD_TEST_ITEM_PRICES="${LOAD_TEST_ITEM_PRICES:-1:10,2:10,3:10,4:10,5:10,6:10,7:20,8:20,9:20,10:20,11:20,12:20}"
 METRICS_COLLECTOR_IMAGE="${METRICS_COLLECTOR_IMAGE:-}"
+IMAGE_TAG="${IMAGE_TAG:-latest}"
+IMAGE_REPOSITORY_PREFIX="${IMAGE_REPOSITORY_PREFIX:-siddhesh1712}"
 
 DEPLOY_STACK=1
 DEPLOY_ONLY=0
@@ -50,6 +52,8 @@ Environment:
   LOAD_TEST_USER_IDS       Comma-separated seeded user IDs (default: 1-12).
   LOAD_TEST_ITEM_IDS       Comma-separated seeded inventory IDs (default: 1-12).
   LOAD_TEST_ITEM_PRICES    Comma-separated id:price pairs matching inventory.
+  IMAGE_TAG                App image tag to deploy (default: latest; e.g. latest-graalvm).
+  IMAGE_REPOSITORY_PREFIX  App image repository prefix (default: siddhesh1712).
 EOF
 }
 
@@ -179,8 +183,15 @@ if (( DEPLOY_STACK )); then
   kubectl apply -n "$NAMESPACE" -f "$ROOT_DIR/service-deployment/inventory-deployment.yml"
   kubectl apply -n "$NAMESPACE" -f "$ROOT_DIR/service-deployment/payment-deployment.yml"
 
-  # The app manifests use :latest. Restarting forces imagePullPolicy: Always to
-  # fetch the images just pushed, even when the Deployment template was unchanged.
+  # Select the strategy-tagged images built and optionally pushed by
+  # scripts/build-images.sh. Defaults preserve the existing :latest workflow.
+  kubectl -n "$NAMESPACE" set image \
+    deployment/coordinator-deployment coordinator="$IMAGE_REPOSITORY_PREFIX/coordinator:$IMAGE_TAG" \
+    deployment/order-deployment order="$IMAGE_REPOSITORY_PREFIX/order:$IMAGE_TAG" \
+    deployment/inventory-deployment inventory="$IMAGE_REPOSITORY_PREFIX/inventory:$IMAGE_TAG" \
+    deployment/payment-deployment payment="$IMAGE_REPOSITORY_PREFIX/payment:$IMAGE_TAG"
+
+  # Restarting forces imagePullPolicy: Always to fetch the selected images.
   kubectl -n "$NAMESPACE" rollout restart deployment/coordinator-deployment deployment/order-deployment deployment/inventory-deployment deployment/payment-deployment
 
   log "Waiting for application rollouts."

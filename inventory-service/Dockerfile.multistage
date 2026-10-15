@@ -1,0 +1,11 @@
+# Build the executable Spring Boot JAR in an isolated Maven/JDK stage.
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /workspace
+COPY . .
+RUN mvn -B -DskipTests -pl inventory-service -am package
+
+# Keep Maven and the JDK out of the runtime image.
+FROM gcr.io/distroless/java21-debian12:nonroot
+WORKDIR /
+COPY --from=build /workspace/inventory-service/target/inventory-service-0.0.1-SNAPSHOT.jar /target.jar
+CMD ["/target.jar"]

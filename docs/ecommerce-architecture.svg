@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1420" viewBox="0 0 1800 1420" role="img" aria-labelledby="title description">
+  <title id="title">E-commerce microservices architecture and order workflow</title>
+  <desc id="description">A deployment overview of the Spring services, Kafka, PostgreSQL, observability and KEDA, followed by the order orchestration flow using transactional outboxes and an orchestrated Saga.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 z" fill="#526581"/></marker>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 z" fill="#2878bd"/></marker>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 z" fill="#21805a"/></marker>
+    <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 z" fill="#8056a5"/></marker>
+    <marker id="arrowBlueStart" markerWidth="10" markerHeight="10" refX="2" refY="5" orient="auto-start-reverse" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 z" fill="#2878bd"/></marker>
+    <style>
+      text{font-family:Inter,Segoe UI,Arial,sans-serif;fill:#172b4d}
+      .title{font-size:32px;font-weight:700}.subtitle{font-size:16px;fill:#526581}
+      .panel-title{font-size:21px;font-weight:700}.section{font-size:13px;font-weight:700;letter-spacing:1.2px;fill:#526581}
+      .box-title{font-size:17px;font-weight:700}.body{font-size:13px;fill:#43546d}.small{font-size:12px;fill:#526581}
+      .panel{fill:#fff;stroke:#d7dfeb;stroke-width:1.5}.cluster{fill:#f5f8fc;stroke:#aab9cc;stroke-width:1.5;stroke-dasharray:7 6}
+      .service{fill:#eaf3fc;stroke:#2878bd;stroke-width:1.7}.broker{fill:#fff4dc;stroke:#d39b29;stroke-width:1.7}
+      .database{fill:#e9f6ef;stroke:#21805a;stroke-width:1.5}.infra{fill:#f2ecf8;stroke:#8056a5;stroke-width:1.5}
+      .client{fill:#f1f4f8;stroke:#8493a8;stroke-width:1.5}.step{fill:#fff;stroke:#c8d3e1;stroke-width:1.5}
+      .line{fill:none;stroke:#526581;stroke-width:2.2;marker-end:url(#arrow)}
+      .line-blue{fill:none;stroke:#2878bd;stroke-width:2.2;marker-end:url(#arrowBlue)}
+      .line-blue-both{fill:none;stroke:#2878bd;stroke-width:2.2;marker-start:url(#arrowBlueStart);marker-end:url(#arrowBlue)}
+      .line-green{fill:none;stroke:#21805a;stroke-width:2.2;marker-end:url(#arrowGreen)}
+      .line-purple{fill:none;stroke:#8056a5;stroke-width:2;stroke-dasharray:6 5;marker-end:url(#arrowPurple)}
+      .bus{fill:none;stroke:#2878bd;stroke-width:2.2}
+      .number{fill:#2878bd}.number-text{font-size:13px;font-weight:700;fill:#fff;text-anchor:middle}
+    </style>
+  </defs>
+
+  <rect width="1800" height="1420" fill="#f7f9fc"/>
+  <text x="60" y="58" class="title">E-commerce microservices architecture</text>
+  <text x="60" y="87" class="subtitle">Kubernetes deployment, asynchronous order coordination, and durable message publishing</text>
+
+  <!-- Deployment overview -->
+  <rect x="50" y="115" width="1700" height="670" rx="18" class="panel"/>
+  <text x="80" y="153" class="panel-title">1 · Runtime architecture</text>
+  <text x="80" y="178" class="small">Services run in ecomm. Blue = Kafka events · green = database access · shared events module provides message DTOs and outbox support.</text>
+
+  <rect x="320" y="195" width="1390" height="575" rx="16" class="cluster"/>
+  <text x="345" y="222" class="section">KUBERNETES · ECOMM NAMESPACE</text>
+
+  <rect x="75" y="385" width="200" height="108" rx="14" class="client"/>
+  <text x="175" y="421" text-anchor="middle" class="box-title">Client / k6</text>
+  <text x="175" y="447" text-anchor="middle" class="body">POST order request</text>
+  <text x="175" y="468" text-anchor="middle" class="body">poll workflow status</text>
+
+  <rect x="365" y="270" width="290" height="145" rx="14" class="service"/>
+  <text x="510" y="302" text-anchor="middle" class="box-title">Coordinator</text>
+  <text x="510" y="328" text-anchor="middle" class="body">REST API · Saga orchestrator</text>
+  <text x="510" y="351" text-anchor="middle" class="body">prepare votes · commit / abort</text>
+  <text x="510" y="383" text-anchor="middle" class="small">outbox publisher · recovery scheduler</text>
+  <path d="M275 420 H350 V345 H365" class="line"/>
+
+  <rect x="770" y="260" width="670" height="125" rx="14" class="broker"/>
+  <text x="1105" y="293" text-anchor="middle" class="box-title">Apache Kafka · single-node KRaft</text>
+  <text x="1105" y="321" text-anchor="middle" class="body">order-service · inventory-service · payment-service</text>
+  <text x="1105" y="345" text-anchor="middle" class="body">coor-service · participant votes and acknowledgements</text>
+  <text x="1105" y="368" text-anchor="middle" class="small">topics currently configured with five partitions</text>
+
+  <path d="M655 320 H755" class="line-blue"/>
+  <path d="M755 356 H655" class="line-blue"/>
+  <text x="705" y="303" text-anchor="middle" class="small">commands</text>
+  <text x="705" y="381" text-anchor="middle" class="small">votes / acks</text>
+
+  <!-- Paired event traffic; double-ended arrows avoid crossed return paths. -->
+  <path d="M785 385 V460" class="line-blue-both"/>
+  <path d="M1105 385 V460" class="line-blue-both"/>
+  <path d="M1425 385 V460" class="line-blue-both"/>
+
+  <rect x="670" y="460" width="230" height="105" rx="14" class="service"/>
+  <text x="785" y="495" text-anchor="middle" class="box-title">Order Service</text>
+  <text x="785" y="520" text-anchor="middle" class="body">create / finalize / cancel</text>
+  <text x="785" y="543" text-anchor="middle" class="small">order state + outbox</text>
+
+  <rect x="990" y="460" width="230" height="105" rx="14" class="service"/>
+  <text x="1105" y="495" text-anchor="middle" class="box-title">Inventory Service</text>
+  <text x="1105" y="520" text-anchor="middle" class="body">reserve / deduct / release</text>
+  <text x="1105" y="543" text-anchor="middle" class="small">stock + workflow + outbox</text>
+
+  <rect x="1310" y="460" width="230" height="105" rx="14" class="service"/>
+  <text x="1425" y="495" text-anchor="middle" class="box-title">Payment Service</text>
+  <text x="1425" y="520" text-anchor="middle" class="body">reserve / charge / release</text>
+  <text x="1425" y="543" text-anchor="middle" class="small">payment workflow + outbox</text>
+
+  <!-- PostgreSQL instance and service-specific databases -->
+  <rect x="365" y="600" width="1175" height="137" rx="14" class="database"/>
+  <text x="952" y="625" text-anchor="middle" class="box-title">PostgreSQL 15 · one instance, separate databases per service</text>
+  <path d="M510 415 V580 H510 V644" class="line-green"/>
+  <path d="M785 565 V644" class="line-green"/>
+  <path d="M1105 565 V644" class="line-green"/>
+  <path d="M1425 565 V644" class="line-green"/>
+
+  <rect x="390" y="646" width="250" height="70" rx="10" fill="#fff" stroke="#8ac3a3"/>
+  <text x="515" y="674" text-anchor="middle" class="box-title">coordinator_db</text>
+  <text x="515" y="698" text-anchor="middle" class="small">workflow state · outbox_events</text>
+  <rect x="665" y="646" width="250" height="70" rx="10" fill="#fff" stroke="#8ac3a3"/>
+  <text x="790" y="674" text-anchor="middle" class="box-title">order_db</text>
+  <text x="790" y="698" text-anchor="middle" class="small">orders · outbox_events</text>
+  <rect x="940" y="646" width="250" height="70" rx="10" fill="#fff" stroke="#8ac3a3"/>
+  <text x="1065" y="674" text-anchor="middle" class="box-title">inventory_db</text>
+  <text x="1065" y="698" text-anchor="middle" class="small">items · reservations · outbox</text>
+  <rect x="1215" y="646" width="300" height="70" rx="10" fill="#fff" stroke="#8ac3a3"/>
+  <text x="1365" y="674" text-anchor="middle" class="box-title">payment_db</text>
+  <text x="1365" y="698" text-anchor="middle" class="small">users · reservations · outbox</text>
+
+  <!-- Operations strip -->
+  <rect x="80" y="749" width="495" height="0" fill="none"/>
+  <rect x="80" y="746" width="500" height="0" fill="none"/>
+  <text x="90" y="765" class="small">Operations: KEDA scales services from Kafka lag · Prometheus scrapes Micrometer metrics · Jaeger receives OTLP traces</text>
+
+  <!-- Workflow panel -->
+  <rect x="50" y="810" width="1700" height="555" rx="18" class="panel"/>
+  <text x="80" y="850" class="panel-title">2 · One order through the system</text>
+  <text x="80" y="878" class="small">The Coordinator orchestrates a durable Saga. Each service commits its database update and outbox event in the same local transaction.</text>
+
+  <!-- numbered steps -->
+  <g>
+    <rect x="80" y="940" width="290" height="220" rx="14" class="step"/>
+    <circle cx="108" cy="970" r="17" class="number"/><text x="108" y="975" class="number-text">1</text>
+    <text x="135" y="976" class="box-title">Accept request</text>
+    <text x="105" y="1015" class="body">Client sends POST /ecomm/order.</text>
+    <text x="105" y="1042" class="body">Coordinator creates a correlation ID,</text>
+    <text x="105" y="1065" class="body">stores PREPARING workflow state, and</text>
+    <text x="105" y="1088" class="body">writes three prepare commands to its</text>
+    <text x="105" y="1111" class="body">outbox in that same DB transaction.</text>
+
+    <rect x="415" y="940" width="290" height="220" rx="14" class="step"/>
+    <circle cx="443" cy="970" r="17" class="number"/><text x="443" y="975" class="number-text">2</text>
+    <text x="470" y="976" class="box-title">Publish commands</text>
+    <text x="440" y="1015" class="body">Outbox publishers send the commands</text>
+    <text x="440" y="1038" class="body">to the order-service, inventory-service,</text>
+    <text x="440" y="1061" class="body">and payment-service Kafka topics.</text>
+    <text x="440" y="1098" class="body">The message key is the correlation ID.</text>
+
+    <rect x="750" y="940" width="290" height="220" rx="14" class="step"/>
+    <circle cx="778" cy="970" r="17" class="number"/><text x="778" y="975" class="number-text">3</text>
+    <text x="805" y="976" class="box-title">Prepare locally</text>
+    <text x="775" y="1015" class="body">Order creates a pending order;</text>
+    <text x="775" y="1038" class="body">Inventory reserves stock; Payment</text>
+    <text x="775" y="1061" class="body">reserves funds. Each participant stores</text>
+    <text x="775" y="1084" class="body">its state and a vote in its local DB</text>
+    <text x="775" y="1107" class="body">transaction, then publishes the vote.</text>
+
+    <rect x="1085" y="940" width="290" height="220" rx="14" class="step"/>
+    <circle cx="1113" cy="970" r="17" class="number"/><text x="1113" y="975" class="number-text">4</text>
+    <text x="1140" y="976" class="box-title">Decide and finalize</text>
+    <text x="1110" y="1015" class="body">If all three votes succeed, Coordinator</text>
+    <text x="1110" y="1038" class="body">publishes commit commands. Otherwise</text>
+    <text x="1110" y="1061" class="body">it publishes abort commands to cancel</text>
+    <text x="1110" y="1084" class="body">the order and release reservations.</text>
+    <text x="1110" y="1111" class="small">Recovery retries unacknowledged decisions.</text>
+
+    <rect x="1420" y="940" width="250" height="220" rx="14" class="step"/>
+    <circle cx="1448" cy="970" r="17" class="number"/><text x="1448" y="975" class="number-text">5</text>
+    <text x="1475" y="976" class="box-title">Return status</text>
+    <text x="1445" y="1015" class="body">Client polls the Coordinator</text>
+    <text x="1445" y="1038" class="body">using the correlation ID until</text>
+    <text x="1445" y="1061" class="body">the workflow reaches COMPLETED</text>
+    <text x="1445" y="1084" class="body">or ABORTED.</text>
+  </g>
+
+  <path d="M370 1050 H405" class="line"/>
+  <path d="M705 1050 H740" class="line"/>
+  <path d="M1040 1050 H1075" class="line"/>
+  <path d="M1375 1050 H1410" class="line"/>
+
+  <rect x="80" y="1200" width="1590" height="105" rx="14" class="infra"/>
+  <text x="110" y="1235" class="box-title">Patterns and guarantees</text>
+  <text x="110" y="1264" class="body">Transactional outbox prevents database/message dual-write loss; deduplication keys and idempotent consumers make retries safe.</text>
+  <text x="110" y="1288" class="body">This is an orchestrated Saga with prepare/commit/abort steps—not one ACID transaction spanning all services.</text>
+
+  <text x="60" y="1395" class="small">Project architecture · Spring Boot 3 · Kafka · PostgreSQL · Kubernetes / Minikube</text>
+</svg>
