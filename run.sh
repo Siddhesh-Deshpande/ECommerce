@@ -185,11 +185,14 @@ if (( DEPLOY_STACK )); then
 
   # Select the strategy-tagged images built and optionally pushed by
   # scripts/build-images.sh. Defaults preserve the existing :latest workflow.
-  kubectl -n "$NAMESPACE" set image \
-    deployment/coordinator-deployment coordinator="$IMAGE_REPOSITORY_PREFIX/coordinator:$IMAGE_TAG" \
-    deployment/order-deployment order="$IMAGE_REPOSITORY_PREFIX/order:$IMAGE_TAG" \
-    deployment/inventory-deployment inventory="$IMAGE_REPOSITORY_PREFIX/inventory:$IMAGE_TAG" \
-    deployment/payment-deployment payment="$IMAGE_REPOSITORY_PREFIX/payment:$IMAGE_TAG"
+  kubectl -n "$NAMESPACE" set image deployment/coordinator-deployment \
+    coordinator="$IMAGE_REPOSITORY_PREFIX/coordinator:$IMAGE_TAG"
+  kubectl -n "$NAMESPACE" set image deployment/order-deployment \
+    order="$IMAGE_REPOSITORY_PREFIX/order:$IMAGE_TAG"
+  kubectl -n "$NAMESPACE" set image deployment/inventory-deployment \
+    inventory="$IMAGE_REPOSITORY_PREFIX/inventory:$IMAGE_TAG"
+  kubectl -n "$NAMESPACE" set image deployment/payment-deployment \
+    payment="$IMAGE_REPOSITORY_PREFIX/payment:$IMAGE_TAG"
 
   # Restarting forces imagePullPolicy: Always to fetch the selected images.
   kubectl -n "$NAMESPACE" rollout restart deployment/coordinator-deployment deployment/order-deployment deployment/inventory-deployment deployment/payment-deployment

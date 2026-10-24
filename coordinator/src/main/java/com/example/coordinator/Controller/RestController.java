@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 
+import java.time.Instant;
 import java.util.List;
 
 @org.springframework.web.bind.annotation.RestController
@@ -44,5 +45,6 @@ public class RestController {
 
     public record OrderSubmissionRequest(Integer clientid, List<Item> items) {}
     public record OrderSubmissionResponse(String correlationId) {}
-    public record WorkflowStatusResponse(String correlationId, String status, Integer orderId) {}
+    public record WorkflowStatusResponse(String correlationId, String status, Integer orderId,
+                                         Instant submittedAt, Instant completedAt) {}
 }

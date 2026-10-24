@@ -220,8 +220,13 @@ public class CoordinatorWorkflowService {
                     && Boolean.TRUE.equals(acks.get("inventory_abort_ack"))
                     && Boolean.TRUE.equals(acks.get("payment_abort_ack"));
         if (allComplete) {
-            jdbcTemplate.update("UPDATE coordinator_workflows SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE correlation_id = ?",
-                    commit ? COMPLETED : ABORTED, correlationId);
+            jdbcTemplate.update("""
+                    UPDATE coordinator_workflows
+                    SET state = ?,
+                        completed_at = CASE WHEN ? THEN clock_timestamp() ELSE completed_at END,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE correlation_id = ?
+                    """, commit ? COMPLETED : ABORTED, commit, correlationId);
         }
     }
 
@@ -268,9 +273,13 @@ public class CoordinatorWorkflowService {
     @Transactional(readOnly = true)
     public Optional<WorkflowStatusResponse> findStatus(String correlationId) {
         List<WorkflowStatusResponse> rows = jdbcTemplate.query("""
-                SELECT correlation_id, state, order_id FROM coordinator_workflows WHERE correlation_id = ?
+                SELECT correlation_id, state, order_id, submitted_at, completed_at
+                FROM coordinator_workflows WHERE correlation_id = ?
                 """, (rs, rowNum) -> new WorkflowStatusResponse(
-                rs.getString("correlation_id"), rs.getString("state"), (Integer) rs.getObject("order_id")), correlationId);
+                rs.getString("correlation_id"), rs.getString("state"), (Integer) rs.getObject("order_id"),
+                rs.getTimestamp("submitted_at").toInstant(),
+                rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant()),
+                correlationId);
         return rows.stream().findFirst();
     }
 

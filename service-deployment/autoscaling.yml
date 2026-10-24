@@ -8,9 +8,9 @@ spec:
     name: coordinator-deployment
   pollingInterval: 10
   minReplicaCount: 1
-  # Minikube currently has 8 GiB / 6 vCPU. Raise to 5 only after the
-  # end-to-end run shows the node and shared PostgreSQL can sustain it.
-  maxReplicaCount: 3
+  # The previous peak run hit this cap while the Coordinator's RPS/Kafka
+  # metrics were still above target. Increase Minikube capacity accordingly.
+  maxReplicaCount: 5
   advanced:
     horizontalPodAutoscalerConfig:
       behavior:
@@ -58,7 +58,8 @@ spec:
     name: order-deployment
   pollingInterval: 10
   minReplicaCount: 1
-  maxReplicaCount: 3
+  # The previous peak run hit this cap while Order consumer lag was above target.
+  maxReplicaCount: 5
   advanced:
     horizontalPodAutoscalerConfig:
       behavior:

@@ -14,6 +14,8 @@ CREATE TABLE coordinator_workflows (
     inventory_abort_ack BOOLEAN,
     payment_abort_ack BOOLEAN,
     decision_attempt INTEGER NOT NULL DEFAULT 0,
+    submitted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    completed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT coordinator_workflows_state_check
