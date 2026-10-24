@@ -472,6 +472,8 @@ def summarize_scaling(phase_starts, pods, hpas, deployments):
     for phase, phase_start in sorted(phase_starts.items(), key=lambda item: item[1]):
         phase_data = {}
         start_ms = phase_start.timestamp() * 1000
+        phase_duration = phase_duration_seconds(phase)
+        end_ms = start_ms + phase_duration * 1000 if phase_duration is not None else None
         for deployment_name, hpa_history in hpas.items():
             hpa_history.sort(key=lambda item: parse_time(item.get("observed_at")) or datetime.min.replace(tzinfo=timezone.utc))
             before = [item for item in hpa_history if epoch_ms(item.get("observed_at")) <= start_ms]
@@ -479,12 +481,16 @@ def summarize_scaling(phase_starts, pods, hpas, deployments):
             trigger_active_before = metric_over_target(before[-1]) if before else None
             trigger_events = [
                 item for item in hpa_history
-                if epoch_ms(item.get("observed_at")) >= start_ms and metric_over_target(item)
+                if epoch_ms(item.get("observed_at")) >= start_ms
+                and (end_ms is None or epoch_ms(item.get("observed_at")) < end_ms)
+                and metric_over_target(item)
             ]
             trigger_event = trigger_events[0] if trigger_events and not trigger_active_before else None
             changes = [
                 item for item in hpa_history
-                if epoch_ms(item.get("observed_at")) >= start_ms and item.get("desired_replicas", 0) > baseline
+                if epoch_ms(item.get("observed_at")) >= start_ms
+                and (end_ms is None or epoch_ms(item.get("observed_at")) < end_ms)
+                and item.get("desired_replicas", 0) > baseline
             ]
             if not changes:
                 phase_data[deployment_name] = {

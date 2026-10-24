@@ -401,8 +401,7 @@ pending_workflows=0
 while :; do
   pending_workflows="$(postgres_psql \
     -d coordinator_db -tA -v ON_ERROR_STOP=1 \
-    -v "run_start=$K6_START_AT" -v "run_end=$K6_END_AT" \
-    -c "SELECT COUNT(*) FROM coordinator_workflows WHERE submitted_at >= :'run_start'::timestamptz AND submitted_at <= :'run_end'::timestamptz AND state NOT IN ('COMPLETED', 'ABORTED');" | tr -d '[:space:]')"
+    -c "SELECT COUNT(*) FROM coordinator_workflows WHERE submitted_at >= '$K6_START_AT'::timestamptz AND submitted_at <= '$K6_END_AT'::timestamptz AND state NOT IN ('COMPLETED', 'ABORTED');" | tr -d '[:space:]')"
   [[ "$pending_workflows" =~ ^[0-9]+$ ]] || die "Could not read pending workflow count from coordinator_db."
   (( pending_workflows == 0 )) && break
   now="$(date +%s)"
@@ -417,8 +416,7 @@ done
 log "Exporting Coordinator workflow timestamps from PostgreSQL."
 postgres_psql \
   -d coordinator_db --csv -v ON_ERROR_STOP=1 \
-  -v "run_start=$K6_START_AT" -v "run_end=$K6_END_AT" \
-  -c "SELECT correlation_id, state, submitted_at, completed_at FROM coordinator_workflows WHERE submitted_at >= :'run_start'::timestamptz AND submitted_at <= :'run_end'::timestamptz ORDER BY submitted_at;" \
+  -c "SELECT correlation_id, state, submitted_at, completed_at FROM coordinator_workflows WHERE submitted_at >= '$K6_START_AT'::timestamptz AND submitted_at <= '$K6_END_AT'::timestamptz ORDER BY submitted_at;" \
   >"$RESULTS_DIR/coordinator-workflows.csv"
 
 postgres_psql -d postgres --csv -v ON_ERROR_STOP=1 \

@@ -1,5 +1,11 @@
 # Reproducible load and scaling measurements
 
+## Research objective and deferred measurements
+
+The research objective is to compare the existing and alternative container image generation strategies under the same e-commerce workload and Kubernetes configuration. The immediate priority is to make the current load test reliably deliver its configured workload and correctly report per-phase request results, order completion times, completion coverage, and scaling behavior. Do not treat a run as a valid comparison if the load generator fails to deliver the scheduled arrivals or phase/workflow measurements are incomplete.
+
+After the load-test results are reliable, extend the experiment to collect metrics that are currently missing for a fuller image-strategy comparison: actual pod CPU and memory usage, image build duration, and image size. The current report records observed image IDs and startup/readiness timings, but it does not currently collect those three deferred measurements. Keep this work deferred until the current load-test reliability and intended metrics are resolved.
+
 ## One-command experiment
 
 From the repository root, run `./run.sh`. It applies PostgreSQL, single-node Apache Kafka in combined KRaft mode, monitoring, and application manifests in dependency order; preserves the existing `ecomm` namespace and PostgreSQL data; idempotently ensures `coordinator_db` exists; restarts the app deployments so they pull the images tagged `latest`; resets the test baseline to one replica and applies KEDA ScaledObjects; starts the Kubernetes observer; runs k6; and writes raw data plus a report under `results/<UTC timestamp>/`.
