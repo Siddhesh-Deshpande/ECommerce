@@ -46,5 +46,5 @@ public class RestController {
     public record OrderSubmissionRequest(Integer clientid, List<Item> items) {}
     public record OrderSubmissionResponse(String correlationId) {}
     public record WorkflowStatusResponse(String correlationId, String status, Integer orderId,
-                                         Instant submittedAt, Instant completedAt) {}
+                                         Instant submittedAt, Instant terminalAt) {}
 }

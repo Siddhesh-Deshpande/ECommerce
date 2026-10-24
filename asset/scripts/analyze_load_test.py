@@ -80,15 +80,20 @@ def read_workflows(path, phase_starts):
                     continue
                 end = start.timestamp() + duration
                 if start.timestamp() <= submitted_at.timestamp() < end:
-                    completed_at = parse_time(row.get("completed_at"))
+                    terminal_at = parse_time(row.get("terminal_at"))
+                    # Keep old completed-only CSVs readable; they cannot provide
+                    # abort latency because the old schema did not timestamp ABORTED.
+                    if terminal_at is None:
+                        terminal_at = parse_time(row.get("completed_at"))
+                    state = row.get("state")
                     result[phase].append({
                         "correlation_id": row.get("correlation_id"),
-                        "state": row.get("state"),
+                        "state": state,
                         "submitted_at": submitted_at,
-                        "completed_at": completed_at,
-                        "completion_latency_ms": (
-                            (completed_at - submitted_at).total_seconds() * 1000
-                            if row.get("state") == "COMPLETED" and completed_at else None
+                        "terminal_at": terminal_at,
+                        "terminal_latency_ms": (
+                            (terminal_at - submitted_at).total_seconds() * 1000
+                            if state in {"COMPLETED", "ABORTED"} and terminal_at else None
                         ),
                     })
                     break
@@ -184,9 +189,17 @@ def summarize_requests(phase_starts, phase_latencies, phase_failures, phase_e2e_
         values = phase_latencies.get(phase, [])
         failures = phase_failures.get(phase, [])
         workflows = phase_workflows.get(phase, [])
-        workflow_latencies = [
-            workflow["completion_latency_ms"] for workflow in workflows
-            if workflow["completion_latency_ms"] is not None
+        terminal_latencies = [
+            workflow["terminal_latency_ms"] for workflow in workflows
+            if workflow["terminal_latency_ms"] is not None
+        ]
+        completed_latencies = [
+            workflow["terminal_latency_ms"] for workflow in workflows
+            if workflow["state"] == "COMPLETED" and workflow["terminal_latency_ms"] is not None
+        ]
+        aborted_latencies = [
+            workflow["terminal_latency_ms"] for workflow in workflows
+            if workflow["state"] == "ABORTED" and workflow["terminal_latency_ms"] is not None
         ]
         workflow_completed = sum(workflow["state"] == "COMPLETED" for workflow in workflows)
         workflow_aborted = sum(workflow["state"] == "ABORTED" for workflow in workflows)
@@ -215,18 +228,19 @@ def summarize_requests(phase_starts, phase_latencies, phase_failures, phase_e2e_
             "orders_completed": workflow_completed,
             "orders_aborted": workflow_aborted,
             "workflows_non_terminal_at_snapshot": workflow_pending,
-            "orders_not_completed_at_snapshot": len(workflows) - workflow_completed,
-            "completion_latency_coverage_percent": (
-                workflow_completed * 100 / len(workflows) if workflows else None
+            "terminal_latency_coverage_percent": (
+                len(terminal_latencies) * 100 / len(workflows) if workflows else None
             ),
             "submission_failure_rate": (
                 sum(phase_submission_errors.get(phase, [])) / len(phase_submission_errors[phase])
                 if phase_submission_errors.get(phase) else None
             ),
-            "workflow_non_success_rate_at_snapshot": (
-                (len(workflows) - workflow_completed) / len(workflows) if workflows else None
+            "workflow_non_terminal_rate_at_snapshot": (
+                workflow_pending / len(workflows) if workflows else None
             ),
-            "end_to_end_completion_latency_ms": summarize_latency(workflow_latencies),
+            "end_to_end_terminal_latency_ms": summarize_latency(terminal_latencies),
+            "completed_order_terminal_latency_ms": summarize_latency(completed_latencies),
+            "aborted_order_terminal_latency_ms": summarize_latency(aborted_latencies),
             "phase_start_utc": phase_starts[phase].isoformat() if phase in phase_starts else None,
         }
     return result
@@ -598,9 +612,9 @@ def main():
     summary = {
         "method": {
             "latency_source": "k6 POST /ecomm/order http_req_duration samples only",
-            "completion_latency_source": (
-                "Coordinator coordinator_workflows.submitted_at and completed_at from PostgreSQL; "
-                "successful workflows only, with no status polling during measured load."
+            "terminal_latency_source": (
+                "Coordinator coordinator_workflows.submitted_at and terminal_at from PostgreSQL; "
+                "includes both COMPLETED and ABORTED terminal outcomes, with no status polling during measured load."
             ),
             "workflow_snapshot_source": "Coordinator PostgreSQL CSV captured after load and post-load drain",
             "percentile_method": "linear interpolation over sorted observations",

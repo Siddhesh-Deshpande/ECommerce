@@ -416,7 +416,7 @@ done
 log "Exporting Coordinator workflow timestamps from PostgreSQL."
 postgres_psql \
   -d coordinator_db --csv -v ON_ERROR_STOP=1 \
-  -c "SELECT correlation_id, state, submitted_at, completed_at FROM coordinator_workflows WHERE submitted_at >= '$K6_START_AT'::timestamptz AND submitted_at <= '$K6_END_AT'::timestamptz ORDER BY submitted_at;" \
+  -c "SELECT correlation_id, state, submitted_at, terminal_at FROM coordinator_workflows WHERE submitted_at >= '$K6_START_AT'::timestamptz AND submitted_at <= '$K6_END_AT'::timestamptz ORDER BY submitted_at;" \
   >"$RESULTS_DIR/coordinator-workflows.csv"
 
 postgres_psql -d postgres --csv -v ON_ERROR_STOP=1 \
