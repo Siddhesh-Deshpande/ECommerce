@@ -1,16 +1,13 @@
 import http from 'k6/http';
-import { check, sleep } from 'k6';
-import { Counter, Rate, Trend } from 'k6/metrics';
+import { check } from 'k6';
+import { Counter, Rate } from 'k6/metrics';
 import exec from 'k6/execution';
 
 const coordinatorUrl = (__ENV.COORDINATOR_URL || 'http://127.0.0.1:8081').replace(/\/$/, '');
-const orderServiceUrl = (__ENV.ORDER_SERVICE_URL || 'http://127.0.0.1:8083').replace(/\/$/, '');
 const burstRate = Number(__ENV.BURST_RATE || 15);
 const peakRate = Number(__ENV.PEAK_RATE || 50);
-const preAllocatedVUs = Number(__ENV.PREALLOCATED_VUS || 100);
-const maxVUs = Number(__ENV.MAX_VUS || 400);
-const pollIntervalSeconds = Number(__ENV.POLL_INTERVAL_SECONDS || 2);
-const completionTimeoutSeconds = Number(__ENV.COMPLETION_TIMEOUT_SECONDS || 60);
+const preAllocatedVUs = Number(__ENV.PREALLOCATED_VUS || 50);
+const maxVUs = Number(__ENV.MAX_VUS || 100);
 const userIds = parseIdList('LOAD_TEST_USER_IDS', range(1, 12));
 const itemIds = parseIdList('LOAD_TEST_ITEM_IDS', range(1, 12));
 const itemStride = coprimeStride(itemIds.length);
@@ -24,14 +21,10 @@ for (const itemId of itemIds) {
 
 const phaseMarkers = new Counter('load_phase_marker');
 const ordersSubmitted = new Counter('orders_submitted');
-const ordersCompleted = new Counter('orders_completed');
 const submissionFailed = new Rate('order_submission_failed');
-const completionFailed = new Rate('order_completion_failed');
-const endToEndLatency = new Trend('order_end_to_end_latency_ms', true);
-const orderLookupLatency = new Trend('order_status_lookup_latency_ms', true);
 
-// A 404 is expected only for order-status polling while the order is still
-// being created. Submission requests must return 200 to count as successful.
+// The measured workload consists only of order submissions. Completion
+// timestamps are collected from Coordinator PostgreSQL after the load ends.
 http.setResponseCallback(http.expectedStatuses(200));
 
 function arrivalScenario(rate, duration, startTime) {
@@ -58,7 +51,6 @@ export const options = {
     'http_req_duration{endpoint:order-submission}': ['p(95)<500'],
     'http_req_failed{endpoint:order-submission}': ['rate<0.01'],
     order_submission_failed: ['rate<0.01'],
-    order_completion_failed: ['rate<0.01'],
   },
 };
 
@@ -130,7 +122,6 @@ function correlationIdFrom(response) {
 
 export default function () {
   const phase = exec.scenario.name;
-  const startedAt = Date.now();
   phaseMarkers.add(1, { phase });
 
   const submission = http.post(`${coordinatorUrl}/ecomm/order`, orderPayload(), {
@@ -149,44 +140,4 @@ export default function () {
   }
 
   ordersSubmitted.add(1, { phase });
-  const deadline = startedAt + completionTimeoutSeconds * 1000;
-
-  while (Date.now() < deadline) {
-    const statusResponse = http.get(
-      `${orderServiceUrl}/orders/by-correlation/${encodeURIComponent(correlationId)}`,
-      {
-        responseCallback: http.expectedStatuses(200, 404),
-        tags: { name: 'GET /orders/by-correlation/:correlationId', endpoint: 'order-status', phase },
-      },
-    );
-    orderLookupLatency.add(statusResponse.timings.duration, { phase });
-
-    if (statusResponse.status === 404) {
-      sleep(pollIntervalSeconds);
-      continue;
-    }
-
-    let status;
-    try {
-      status = statusResponse.json('status');
-    } catch (_) {
-      status = null;
-    }
-
-    if (status === 'ORDER_COMPLETED') {
-      ordersCompleted.add(1, { phase });
-      completionFailed.add(false, { phase });
-      endToEndLatency.add(Date.now() - startedAt, { phase });
-      check(statusResponse, { 'order reached ORDER_COMPLETED': (response) => response.status === 200 });
-      return;
-    }
-
-    if (status === 'ORDER_CANCELLED' || statusResponse.status >= 500) {
-      break;
-    }
-
-    sleep(pollIntervalSeconds);
-  }
-
-  completionFailed.add(true, { phase });
 }

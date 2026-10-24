@@ -14,8 +14,10 @@ SLO_WINDOW_SECONDS="${SLO_WINDOW_SECONDS:-30}"
 SLO_MIN_REQUESTS="${SLO_MIN_REQUESTS:-30}"
 BURST_RATE="${BURST_RATE:-15}"
 PEAK_RATE="${PEAK_RATE:-50}"
-PREALLOCATED_VUS="${PREALLOCATED_VUS:-100}"
-MAX_VUS="${MAX_VUS:-400}"
+PREALLOCATED_VUS="${PREALLOCATED_VUS:-50}"
+MAX_VUS="${MAX_VUS:-100}"
+WORKFLOW_DRAIN_TIMEOUT_SECONDS="${WORKFLOW_DRAIN_TIMEOUT_SECONDS:-300}"
+WORKFLOW_DRAIN_POLL_SECONDS="${WORKFLOW_DRAIN_POLL_SECONDS:-5}"
 LOAD_TEST_USER_IDS="${LOAD_TEST_USER_IDS:-1,2,3,4,5,6,7,8,9,10,11,12}"
 LOAD_TEST_ITEM_IDS="${LOAD_TEST_ITEM_IDS:-1,2,3,4,5,6,7,8,9,10,11,12}"
 LOAD_TEST_ITEM_PRICES="${LOAD_TEST_ITEM_PRICES:-1:10,2:10,3:10,4:10,5:10,6:10,7:20,8:20,9:20,10:20,11:20,12:20}"
@@ -48,6 +50,7 @@ Options:
 Environment:
   METRICS_COLLECTOR_IMAGE  Registry image for non-Minikube/non-Kind clusters.
   BURST_RATE / PEAK_RATE   k6 phase rates (defaults: 15 and 50 iterations/s).
+  WORKFLOW_DRAIN_TIMEOUT_SECONDS  Post-load wait for terminal workflows (default: 300).
   RESULTS_ROOT             Output root (default: ./results).
   LOAD_TEST_USER_IDS       Comma-separated seeded user IDs (default: 1-12).
   LOAD_TEST_ITEM_IDS       Comma-separated seeded inventory IDs (default: 1-12).
@@ -275,24 +278,19 @@ if [[ "$CONTEXT" == *minikube* ]]; then
   # tunnel to a pod and produced stream timeouts/reset connections at load.
   MINIKUBE_IP="${MINIKUBE_IP:-$(minikube ip 2>/dev/null || true)}"
   COORDINATOR_NODE_PORT="$(kubectl -n "$NAMESPACE" get service coordinator-service -o jsonpath='{.spec.ports[0].nodePort}')"
-  ORDER_NODE_PORT="$(kubectl -n "$NAMESPACE" get service order-service -o jsonpath='{.spec.ports[0].nodePort}')"
   [[ -n "$MINIKUBE_IP" ]] || die "Could not determine Minikube IP; set MINIKUBE_IP explicitly."
-  [[ -n "$COORDINATOR_NODE_PORT" && -n "$ORDER_NODE_PORT" ]] || die "Coordinator and Order Services must both have NodePorts."
+  [[ -n "$COORDINATOR_NODE_PORT" ]] || die "Coordinator Service must have a NodePort."
   COORDINATOR_URL="${COORDINATOR_URL:-http://${MINIKUBE_IP}:${COORDINATOR_NODE_PORT}}"
-  ORDER_SERVICE_URL="${ORDER_SERVICE_URL:-http://${MINIKUBE_IP}:${ORDER_NODE_PORT}}"
 else
   log "Starting port-forwards for non-Minikube cluster access."
   kubectl -n "$NAMESPACE" port-forward service/coordinator-service 8081:80 >"$RESULTS_DIR/coordinator-port-forward.log" 2>&1 &
   PIDS+=("$!")
-  kubectl -n "$NAMESPACE" port-forward service/order-service 8083:80 >"$RESULTS_DIR/order-port-forward.log" 2>&1 &
-  PIDS+=("$!")
   COORDINATOR_URL="${COORDINATOR_URL:-http://127.0.0.1:8081}"
-  ORDER_SERVICE_URL="${ORDER_SERVICE_URL:-http://127.0.0.1:8083}"
 fi
 log "Coordinator load-test URL: $COORDINATOR_URL"
-log "Order status URL: $ORDER_SERVICE_URL"
 
-log "Running k6 phases: baseline, ${BURST_RATE} RPS burst, ${PEAK_RATE} RPS peak, recovery. This takes about 16 minutes including drain windows."
+log "Running submission-only k6 phases: baseline, ${BURST_RATE} RPS burst, ${PEAK_RATE} RPS peak, recovery."
+K6_START_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
 set +e
 k6 run \
   --out "json=${RESULTS_DIR}/k6.jsonl" \
@@ -305,10 +303,38 @@ k6 run \
   -e "LOAD_TEST_ITEM_IDS=${LOAD_TEST_ITEM_IDS}" \
   -e "LOAD_TEST_ITEM_PRICES=${LOAD_TEST_ITEM_PRICES}" \
   -e "COORDINATOR_URL=${COORDINATOR_URL}" \
-  -e "ORDER_SERVICE_URL=${ORDER_SERVICE_URL}" \
   "$ROOT_DIR/asset/scripts/load_testing.js"
 K6_STATUS=$?
 set -e
+K6_END_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+
+log "Waiting for workflows from this run to reach a terminal state (up to ${WORKFLOW_DRAIN_TIMEOUT_SECONDS}s); no order-status polling is sent to the services."
+drain_started_at="$(date +%s)"
+pending_workflows=0
+while :; do
+  pending_workflows="$(kubectl exec -n "$NAMESPACE" postgres-0 -- \
+    sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql "$@"' sh \
+    -U "$POSTGRES_USER" -d coordinator_db -tA -v ON_ERROR_STOP=1 \
+    -v "run_start=$K6_START_AT" -v "run_end=$K6_END_AT" \
+    -c "SELECT COUNT(*) FROM coordinator_workflows WHERE submitted_at >= :'run_start'::timestamptz AND submitted_at <= :'run_end'::timestamptz AND state NOT IN ('COMPLETED', 'ABORTED');" | tr -d '[:space:]')"
+  [[ "$pending_workflows" =~ ^[0-9]+$ ]] || die "Could not read pending workflow count from coordinator_db."
+  (( pending_workflows == 0 )) && break
+  now="$(date +%s)"
+  if (( now - drain_started_at >= WORKFLOW_DRAIN_TIMEOUT_SECONDS )); then
+    log "Drain timeout reached with $pending_workflows workflows still non-terminal. Capturing their database status now."
+    break
+  fi
+  log "$pending_workflows workflows are still non-terminal; checking again in ${WORKFLOW_DRAIN_POLL_SECONDS}s."
+  sleep "$WORKFLOW_DRAIN_POLL_SECONDS"
+done
+
+log "Exporting Coordinator workflow timestamps from PostgreSQL."
+kubectl exec -n "$NAMESPACE" postgres-0 -- \
+  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql "$@"' sh \
+  -U "$POSTGRES_USER" -d coordinator_db --csv -v ON_ERROR_STOP=1 \
+  -v "run_start=$K6_START_AT" -v "run_end=$K6_END_AT" \
+  -c "SELECT correlation_id, state, submitted_at, completed_at FROM coordinator_workflows WHERE submitted_at >= :'run_start'::timestamptz AND submitted_at <= :'run_end'::timestamptz ORDER BY submitted_at;" \
+  >"$RESULTS_DIR/coordinator-workflows.csv"
 
 log "Capturing final cluster state."
 if ! kubectl -n "$NAMESPACE" get pods -o wide >"$RESULTS_DIR/pods-after.txt"; then
@@ -332,11 +358,13 @@ log "Calculating the report."
 python3 "$ROOT_DIR/asset/scripts/analyze_load_test.py" \
   --k6 "$RESULTS_DIR/k6.jsonl" \
   --kubernetes "$RESULTS_DIR/kubernetes-events.jsonl" \
+  --workflows "$RESULTS_DIR/coordinator-workflows.csv" \
   --output "$RESULTS_DIR/metrics-report.json" \
   --slo-p95-ms "$SLO_P95_MS" \
   --slo-window-seconds "$SLO_WINDOW_SECONDS" \
   --slo-min-requests "$SLO_MIN_REQUESTS"
 
+log "Coordinator workflow timestamp snapshot: $RESULTS_DIR/coordinator-workflows.csv"
 log "Experiment complete. Report: $RESULTS_DIR/metrics-report.json"
 log "Raw k6 data: $RESULTS_DIR/k6.jsonl"
 log "Kubernetes observer data: $RESULTS_DIR/kubernetes-events.jsonl"

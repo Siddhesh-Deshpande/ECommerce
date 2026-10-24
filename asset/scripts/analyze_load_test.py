@@ -2,6 +2,7 @@
 """Summarize k6 JSON output and Kubernetes JSONL lifecycle observations."""
 
 import argparse
+import csv
 import json
 import math
 from collections import defaultdict
@@ -15,6 +16,8 @@ PHASE_DURATIONS_SECONDS = {
     "peak_burst": 300,
     "recovery": 120,
 }
+
+
 def parse_time(value):
     if not value:
         return None
@@ -38,6 +41,45 @@ def percentile(values, percentage):
     if low == high:
         return ordered[low]
     return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
+
+
+def summarize_latency(values):
+    return {
+        "samples": len(values),
+        "mean": sum(values) / len(values) if values else None,
+        "p50": percentile(values, 50),
+        "p95": percentile(values, 95),
+        "p99": percentile(values, 99),
+    }
+
+
+def read_workflows(path, phase_starts):
+    """Group durable Coordinator rows by their k6 submission phase."""
+    result = defaultdict(list)
+    if path is None:
+        return result
+
+    with open(path, newline="", encoding="utf-8") as stream:
+        for row in csv.DictReader(stream):
+            submitted_at = parse_time(row.get("submitted_at"))
+            if not submitted_at:
+                continue
+            for phase, start in phase_starts.items():
+                end = start.timestamp() + PHASE_DURATIONS_SECONDS.get(phase, 0)
+                if start.timestamp() <= submitted_at.timestamp() < end:
+                    completed_at = parse_time(row.get("completed_at"))
+                    result[phase].append({
+                        "correlation_id": row.get("correlation_id"),
+                        "state": row.get("state"),
+                        "submitted_at": submitted_at,
+                        "completed_at": completed_at,
+                        "completion_latency_ms": (
+                            (completed_at - submitted_at).total_seconds() * 1000
+                            if row.get("state") == "COMPLETED" and completed_at else None
+                        ),
+                    })
+                    break
+    return result
 
 
 def load_json_lines(path, ignore_non_json=False, ignored_counter=None):
@@ -110,10 +152,20 @@ def read_k6(path):
 
 def summarize_requests(phase_starts, phase_latencies, phase_failures, phase_e2e_latencies,
                        phase_lookup_latencies, phase_submission_errors, phase_completion_errors,
-                       phase_submitted, phase_completed, phase_dropped):
+                       phase_submitted, phase_completed, phase_dropped, phase_workflows):
     result = {}
-    for phase, values in sorted(phase_latencies.items(), key=lambda item: phase_starts.get(item[0], datetime.max.replace(tzinfo=timezone.utc))):
+    phases = set(phase_starts) | set(phase_latencies) | set(phase_workflows)
+    for phase in sorted(phases, key=lambda name: phase_starts.get(name, datetime.max.replace(tzinfo=timezone.utc))):
+        values = phase_latencies.get(phase, [])
         failures = phase_failures.get(phase, [])
+        workflows = phase_workflows.get(phase, [])
+        workflow_latencies = [
+            workflow["completion_latency_ms"] for workflow in workflows
+            if workflow["completion_latency_ms"] is not None
+        ]
+        workflow_completed = sum(workflow["state"] == "COMPLETED" for workflow in workflows)
+        workflow_aborted = sum(workflow["state"] == "ABORTED" for workflow in workflows)
+        workflow_pending = len(workflows) - workflow_completed - workflow_aborted
         duration = PHASE_DURATIONS_SECONDS.get(phase)
         result[phase] = {
             "samples": len(values),
@@ -125,33 +177,20 @@ def summarize_requests(phase_starts, phase_latencies, phase_failures, phase_e2e_
                 "p99": percentile(values, 99),
             },
             "http_failure_rate": sum(failures) / len(failures) if failures else None,
-            "orders_submitted": phase_submitted.get(phase, 0),
-            "orders_completed": phase_completed.get(phase, 0),
-            "orders_not_completed_within_timeout": max(
-                0, phase_submitted.get(phase, 0) - phase_completed.get(phase, 0)
-            ),
+            "orders_submitted": len(workflows),
+            "k6_successful_submission_responses": phase_submitted.get(phase, 0),
+            "orders_completed": workflow_completed,
+            "orders_aborted": workflow_aborted,
+            "workflows_non_terminal_at_snapshot": workflow_pending,
+            "orders_not_completed_at_snapshot": len(workflows) - workflow_completed,
             "submission_failure_rate": (
                 sum(phase_submission_errors.get(phase, [])) / len(phase_submission_errors[phase])
                 if phase_submission_errors.get(phase) else None
             ),
-            "completion_timeout_rate": (
-                sum(phase_completion_errors.get(phase, [])) / len(phase_completion_errors[phase])
-                if phase_completion_errors.get(phase) else None
+            "workflow_non_success_rate_at_snapshot": (
+                (len(workflows) - workflow_completed) / len(workflows) if workflows else None
             ),
-            "end_to_end_completion_latency_ms": {
-                "samples": len(phase_e2e_latencies.get(phase, [])),
-                "mean": (sum(phase_e2e_latencies[phase]) / len(phase_e2e_latencies[phase])
-                         if phase_e2e_latencies.get(phase) else None),
-                "p50": percentile(phase_e2e_latencies.get(phase, []), 50),
-                "p95": percentile(phase_e2e_latencies.get(phase, []), 95),
-                "p99": percentile(phase_e2e_latencies.get(phase, []), 99),
-            },
-            "status_lookup_latency_ms": {
-                "samples": len(phase_lookup_latencies.get(phase, [])),
-                "p50": percentile(phase_lookup_latencies.get(phase, []), 50),
-                "p95": percentile(phase_lookup_latencies.get(phase, []), 95),
-                "p99": percentile(phase_lookup_latencies.get(phase, []), 99),
-            },
+            "end_to_end_completion_latency_ms": summarize_latency(workflow_latencies),
             "dropped_iterations": phase_dropped.get(phase, 0),
             "phase_start_utc": phase_starts[phase].isoformat() if phase in phase_starts else None,
         }
@@ -470,6 +509,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--k6", required=True, help="k6 JSON output file from --out json=...")
     parser.add_argument("--kubernetes", required=True, help="collector JSONL output")
+    parser.add_argument("--workflows", help="CSV snapshot of Coordinator workflow timestamps from PostgreSQL")
     parser.add_argument("--output", default="load-test-summary.json")
     parser.add_argument("--slo-p95-ms", type=float, default=500)
     parser.add_argument("--slo-window-seconds", type=int, default=30)
@@ -486,6 +526,7 @@ def main():
         raise SystemExit("No k6 load_phase_marker samples found; verify k6 JSON output and phase tags.")
     (pods, hpas, deployments, app_ready_metrics, scaledobjects, collector_gaps,
      collector_log_lines_ignored) = read_kubernetes(args.kubernetes)
+    phase_workflows = read_workflows(args.workflows, phase_starts)
     violations, slo_windows = slo_episodes(
         request_samples,
         args.slo_window_seconds,
@@ -496,6 +537,11 @@ def main():
     summary = {
         "method": {
             "latency_source": "k6 POST /ecomm/order http_req_duration samples only",
+            "completion_latency_source": (
+                "Coordinator coordinator_workflows.submitted_at and completed_at from PostgreSQL; "
+                "successful workflows only, with no status polling during measured load."
+            ),
+            "workflow_snapshot_source": "Coordinator PostgreSQL CSV captured after load and post-load drain",
             "percentile_method": "linear interpolation over sorted observations",
             "throughput_denominator": "configured phase duration",
             "slo": {
@@ -508,7 +554,7 @@ def main():
         "requests_by_phase": summarize_requests(
             phase_starts, phase_latencies, phase_failures, phase_e2e_latencies,
             phase_lookup_latencies, phase_submission_errors, phase_completion_errors,
-            phase_submitted, phase_completed, phase_dropped,
+            phase_submitted, phase_completed, phase_dropped, phase_workflows,
         ),
         "slo_violations": violations,
         "slo_windows": slo_windows,

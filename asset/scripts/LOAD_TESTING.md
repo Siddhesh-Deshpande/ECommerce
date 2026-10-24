@@ -10,7 +10,9 @@ The script requires a reachable Kubernetes context with a default StorageClass (
 
 The Prometheus configuration discovers each Spring service pod directly. This lets the Coordinator KEDA query sum the per-pod request counters when the Coordinator scales out.
 
-The k6 script records four distinct phases: a 3 RPS baseline, a sustained 15 RPS burst, a sustained 50 RPS burst, then a 3 RPS recovery phase. Coordinator scales on filtered order-submission RPS and response-topic lag. The participant services scale on their Kafka consumer-group lag. The Coordinator request-rate target is currently 8 requests/second per replica, pending calibration from balanced-load measurements. Adjust `BURST_RATE` and `PEAK_RATE` for other profiles.
+The k6 script records four distinct phases: a 3 RPS baseline, a sustained 15 RPS burst, a sustained 50 RPS burst, then a 3 RPS recovery phase. During these measured phases, each k6 iteration sends one `POST /ecomm/order` and ends; it does not poll for order completion. After submissions finish, `run.sh` waits for workflows to become terminal (up to `WORKFLOW_DRAIN_TIMEOUT_SECONDS`, default 300 seconds) and exports their Coordinator database timestamps. Coordinator scales on filtered order-submission RPS and response-topic lag. The participant services scale on their Kafka consumer-group lag. The Coordinator request-rate target is currently 8 requests/second per replica, pending calibration from balanced-load measurements. Adjust `BURST_RATE` and `PEAK_RATE` for other profiles.
+
+Since each k6 iteration now ends after the submission response, the VU defaults are `PREALLOCATED_VUS=50` and `MAX_VUS=100`. They no longer need to cover the order-processing duration.
 
 For the current Minikube node budget (8 GiB / 6 vCPU), each KEDA ScaledObject is capped at three replicas. The Kafka topics have five partitions, but the replica cap is intentionally lower until the full stack's resource and PostgreSQL limits have been measured. Raise the caps to five only after the node and database sustain the load without pending pods, connection saturation, or lock contention.
 
@@ -26,7 +28,7 @@ k6 run \
 
 Every item is ordered with quantity 1. The configured item price is sent in the request so the Order and Payment services charge the same amount as the Inventory catalog.
 
-The test measures Coordinator `POST /ecomm/order` latency separately from Order Service status-poll latency. Each submitted order is followed by correlation ID until `ORDER_COMPLETED` or the configured timeout. This repeated status polling creates real Order Service and PostgreSQL read load. The current Order ScaledObject deliberately does not use GET request rate as a scaling signal; it scales on Kafka work only. A single end-of-run status query would show completion by the query time, not actual completion latency, so it should not replace polling unless completion timing is collected passively from durable workflow timestamps or a completion metric.
+The test measures Coordinator `POST /ecomm/order` latency from k6. Successful end-to-end workflow duration is calculated after the load from `coordinator_workflows.completed_at - submitted_at`; `completed_at` is recorded by the Coordinator when all participant commit acknowledgments arrive. This gives the workflow's database-clock duration without per-order status polling or polling traffic during the measured phases. The report also records aborted and non-terminal workflows from the final database snapshot. Phase assignment uses database submission time and k6 phase markers, so the k6 runner and PostgreSQL host should have synchronized clocks. The workflow CSV is retained in each results directory for audit.
 
 ## 1. Deploy probe and application changes
 
@@ -76,17 +78,15 @@ k6 run \
   asset/scripts/load_testing.js
 ```
 
-The local mode measures request and order-completion latency only; it cannot measure Kubernetes scale-up or pod startup. Use the Kubernetes mode for those metrics.
+The standalone k6 command measures submission latency only. The timestamp-based workflow completion report is produced by `run.sh`, which can query the Coordinator database after the load; standalone k6 does not collect that database snapshot.
 
-For Kubernetes, the Coordinator is exposed through NodePort and Order Service is ClusterIP in the current manifests. Port-forward Order Service in another terminal and provide the Coordinator NodePort URL:
+For a standalone Kubernetes k6 run, only the Coordinator endpoint is needed. `run.sh` additionally captures workflow timestamps directly from PostgreSQL after the measured load and post-load drain.
 
 ```bash
-kubectl -n ecomm port-forward service/order-service 8083:80
 k6 run \
   --out json=results/k6.jsonl \
   --summary-export=results/k6-summary.json \
   -e COORDINATOR_URL=http://<node-ip>:<coordinator-node-port> \
-  -e ORDER_SERVICE_URL=http://127.0.0.1:8083 \
   -e BURST_RATE=15 \
   -e PEAK_RATE=50 \
   asset/scripts/load_testing.js
