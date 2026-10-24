@@ -313,8 +313,8 @@ drain_started_at="$(date +%s)"
 pending_workflows=0
 while :; do
   pending_workflows="$(kubectl exec -n "$NAMESPACE" postgres-0 -- \
-    sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql "$@"' sh \
-    -U "$POSTGRES_USER" -d coordinator_db -tA -v ON_ERROR_STOP=1 \
+    sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -U "$POSTGRES_USER" "$@"' sh \
+    -d coordinator_db -tA -v ON_ERROR_STOP=1 \
     -v "run_start=$K6_START_AT" -v "run_end=$K6_END_AT" \
     -c "SELECT COUNT(*) FROM coordinator_workflows WHERE submitted_at >= :'run_start'::timestamptz AND submitted_at <= :'run_end'::timestamptz AND state NOT IN ('COMPLETED', 'ABORTED');" | tr -d '[:space:]')"
   [[ "$pending_workflows" =~ ^[0-9]+$ ]] || die "Could not read pending workflow count from coordinator_db."
@@ -330,8 +330,8 @@ done
 
 log "Exporting Coordinator workflow timestamps from PostgreSQL."
 kubectl exec -n "$NAMESPACE" postgres-0 -- \
-  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql "$@"' sh \
-  -U "$POSTGRES_USER" -d coordinator_db --csv -v ON_ERROR_STOP=1 \
+  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -U "$POSTGRES_USER" "$@"' sh \
+  -d coordinator_db --csv -v ON_ERROR_STOP=1 \
   -v "run_start=$K6_START_AT" -v "run_end=$K6_END_AT" \
   -c "SELECT correlation_id, state, submitted_at, completed_at FROM coordinator_workflows WHERE submitted_at >= :'run_start'::timestamptz AND submitted_at <= :'run_end'::timestamptz ORDER BY submitted_at;" \
   >"$RESULTS_DIR/coordinator-workflows.csv"

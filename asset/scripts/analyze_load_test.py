@@ -126,6 +126,9 @@ def read_k6(path):
             all_http_samples.append((sample_time, latency))
             if phase:
                 phase_latencies[phase].append(latency)
+                # Also use POST samples as phase boundaries. This lets the
+                # analyzer recover runs whose k6 output omitted custom counters.
+                phase_starts[phase] = min(phase_starts.get(phase, sample_time), sample_time)
         elif metric == "http_req_failed" and tags.get("endpoint") == "order-submission":
             if phase:
                 phase_failures[phase].append(bool(data.get("value", 0)))
