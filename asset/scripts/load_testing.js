@@ -6,9 +6,15 @@ import exec from 'k6/execution';
 const coordinatorUrl = (__ENV.COORDINATOR_URL || 'http://127.0.0.1:8081').replace(/\/$/, '');
 const burstRate = Number(__ENV.BURST_RATE || 15);
 const peakRate = Number(__ENV.PEAK_RATE || 50);
+const targetRate = __ENV.TARGET_RPS ? Number(__ENV.TARGET_RPS) : null;
+const warmupRate = Number(__ENV.WARMUP_RATE || 3);
+const warmupSeconds = Number(__ENV.WARMUP_SECONDS || 120);
+const rampUpSeconds = Number(__ENV.RAMP_UP_SECONDS || 300);
+const holdSeconds = Number(__ENV.HOLD_SECONDS || 300);
+const rampDownSeconds = Number(__ENV.RAMP_DOWN_SECONDS || 120);
 const requestTimeoutSeconds = Number(__ENV.HTTP_TIMEOUT_SECONDS || 5);
 const vuSafetyFactor = Number(__ENV.VU_SAFETY_FACTOR || 1.2);
-const highestRate = Math.max(burstRate, peakRate);
+const highestRate = targetRate === null ? Math.max(burstRate, peakRate) : Math.max(targetRate, warmupRate);
 const requiredVUs = Math.max(50, Math.ceil(highestRate * requestTimeoutSeconds * vuSafetyFactor));
 const preAllocatedVUs = Number(__ENV.PREALLOCATED_VUS || requiredVUs);
 const userIds = parseIdList('LOAD_TEST_USER_IDS', range(1, 12));
@@ -18,6 +24,13 @@ const itemPrices = parseItemPrices(__ENV.LOAD_TEST_ITEM_PRICES || '1:10,2:10,3:1
 
 if (!Number.isInteger(burstRate) || burstRate <= 0 || !Number.isInteger(peakRate) || peakRate <= 0) {
   throw new Error('BURST_RATE and PEAK_RATE must be positive integers');
+}
+if (targetRate !== null && (!Number.isInteger(targetRate) || targetRate <= 0)) {
+  throw new Error('TARGET_RPS must be a positive integer');
+}
+if (![warmupRate, warmupSeconds, rampUpSeconds, holdSeconds, rampDownSeconds].every(Number.isInteger)
+    || warmupRate <= 0 || warmupSeconds <= 0 || rampUpSeconds <= 0 || holdSeconds <= 0 || rampDownSeconds <= 0) {
+  throw new Error('Warmup rate and all single-target phase durations must be positive integers');
 }
 if (!Number.isFinite(requestTimeoutSeconds) || requestTimeoutSeconds <= 0
     || !Number.isFinite(vuSafetyFactor) || vuSafetyFactor < 1) {
@@ -54,20 +67,14 @@ const transitionUp = (target) => ({ target, duration: '1s' });
 // VU pool. The 1s ramps fit inside the existing 30s gaps; requests in those
 // gaps receive their own transition phase tags. Plateau start times and
 // durations remain (0s, 150s, 480s, 810s) and (2m, 5m, 5m, 2m).
-const stages = [
-  { target: 3, duration: '2m' },
-  ...transitionDown,
-  transitionUp(burstRate),
-  { target: burstRate, duration: '5m' },
-  ...transitionDown,
-  transitionUp(peakRate),
-  { target: peakRate, duration: '5m' },
-  ...transitionDown,
-  transitionUp(3),
+const legacyStages = [
+  { target: 3, duration: '2m' }, ...transitionDown, transitionUp(burstRate),
+  { target: burstRate, duration: '5m' }, ...transitionDown, transitionUp(peakRate),
+  { target: peakRate, duration: '5m' }, ...transitionDown, transitionUp(3),
   { target: 3, duration: '2m' },
 ];
 
-const profilePhases = [
+const legacyPhases = [
   { name: 'baseline', start: 0, end: 120 },
   { name: 'transition_baseline_to_burst', start: 120, end: 150 },
   { name: `burst_${burstRate}_rps`, start: 150, end: 450 },
@@ -77,11 +84,37 @@ const profilePhases = [
   { name: 'recovery', start: 810, end: 930 },
 ];
 
+function singleTargetProfile() {
+  const phases = [];
+  let start = 0;
+  const add = (name, duration, rate) => {
+    phases.push({ name, start, end: start + duration, duration, rate });
+    start += duration;
+  };
+  add('warmup', warmupSeconds, warmupRate);
+  add('ramp_up', rampUpSeconds, null);
+  add('target_hold', holdSeconds, targetRate);
+  add('ramp_down', rampDownSeconds, null);
+  return {
+    stages: [
+      { target: warmupRate, duration: `${warmupSeconds}s` },
+      { target: targetRate, duration: `${rampUpSeconds}s` },
+      { target: targetRate, duration: `${holdSeconds}s` },
+      { target: 0, duration: `${rampDownSeconds}s` },
+    ],
+    phases,
+  };
+}
+
+const diagnosticProfile = targetRate === null ? null : singleTargetProfile();
+const stages = diagnosticProfile ? diagnosticProfile.stages : legacyStages;
+const profilePhases = diagnosticProfile ? diagnosticProfile.phases : legacyPhases;
+
 export const options = {
   scenarios: {
     load_profile: {
       executor: 'ramping-arrival-rate',
-      startRate: 3,
+      startRate: targetRate === null ? 3 : warmupRate,
       timeUnit: '1s',
       preAllocatedVUs,
       maxVUs: preAllocatedVUs,
@@ -175,7 +208,11 @@ export default function () {
   const phase = phaseWindow ? phaseWindow.name : undefined;
   if (phaseWindow) {
     const scheduledPhaseStart = new Date(exec.scenario.startTime + phaseWindow.start * 1000).toISOString();
-    phaseMarkers.add(1, { phase, phase_start_utc: scheduledPhaseStart });
+    phaseMarkers.add(1, {
+      phase,
+      phase_start_utc: scheduledPhaseStart,
+      phase_duration_seconds: String(phaseWindow.duration || (phaseWindow.end - phaseWindow.start)),
+    });
   }
 
   const requestTags = phase

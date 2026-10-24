@@ -9,6 +9,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from urllib.error import URLError
+from urllib.parse import urlencode
 from urllib.request import urlopen
 
 from kubernetes import client, config, watch
@@ -20,6 +21,27 @@ APP_PORTS = {
     "order": 8083,
     "inventory": 8082,
     "payment": 8084,
+}
+
+PROMETHEUS_QUERIES = {
+    "container_cpu_cores": (
+        'sum by (pod, container) (rate(container_cpu_usage_seconds_total'
+        '{namespace="ecomm",container!="",container!="POD"}[1m]))'
+    ),
+    "container_memory_working_set_bytes": (
+        'container_memory_working_set_bytes'
+        '{namespace="ecomm",container!="",container!="POD"}'
+    ),
+    "container_cpu_throttled_period_ratio": (
+        'sum by (pod, container) (rate(container_cpu_cfs_throttled_periods_total'
+        '{namespace="ecomm",container!="",container!="POD"}[1m]))'
+        ' / sum by (pod, container) (rate(container_cpu_cfs_periods_total'
+        '{namespace="ecomm",container!="",container!="POD"}[1m]))'
+    ),
+    "kafka_consumer_group_lag": (
+        'sum by (consumergroup, topic) (kafka_consumergroup_lag'
+        '{topic=~"coor-service|order-service|inventory-service|payment-service"})'
+    ),
 }
 
 
@@ -115,6 +137,43 @@ class Recorder:
                 })
         except (URLError, TimeoutError, json.JSONDecodeError, KeyError, StopIteration) as exc:
             print(f"Could not read app-ready metric from {record['name']}: {exc}", file=sys.stderr)
+
+    def sample_prometheus(self):
+        while not self.stop_event.is_set():
+            for metric, query in PROMETHEUS_QUERIES.items():
+                if self.stop_event.is_set():
+                    break
+                url = f"{self.args.prometheus_url.rstrip('/')}/api/v1/query?{urlencode({'query': query})}"
+                try:
+                    with urlopen(url, timeout=self.args.prometheus_timeout) as response:
+                        payload = json.loads(response.read().decode("utf-8"))
+                    if payload.get("status") != "success":
+                        raise ValueError(payload.get("error", "Prometheus query failed"))
+                    results = payload.get("data", {}).get("result", [])
+                    if not results:
+                        self.write({
+                            "record_type": "runtime_metric_error",
+                            "metric": metric,
+                            "reason": "Prometheus query returned no time series",
+                        })
+                    for item in results:
+                        value = item.get("value", [None, None])[1]
+                        if value is None or value == "NaN":
+                            continue
+                        self.write({
+                            "record_type": "runtime_metric_sample",
+                            "metric": metric,
+                            "labels": item.get("metric", {}),
+                            "value": float(value),
+                        })
+                except (URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+                    self.write({
+                        "record_type": "runtime_metric_error",
+                        "metric": metric,
+                        "reason": str(exc),
+                    })
+                    print(f"Prometheus sample failed for {metric}: {exc}", file=sys.stderr)
+            self.stop_event.wait(self.args.sample_interval)
 
     def watch_resource(self, resource, list_call, normalize):
         resource_version = None
@@ -283,6 +342,11 @@ class Recorder:
             threading.Thread(target=self.watch_resource, args=entry, daemon=True, name=f"watch-{entry[0]}")
             for entry in streams
         ]
+        threads.append(threading.Thread(
+            target=self.sample_prometheus,
+            daemon=True,
+            name="sample-prometheus-runtime-metrics",
+        ))
         for thread in threads:
             thread.start()
 
@@ -306,6 +370,9 @@ def main():
     parser.add_argument("--output", default="kubernetes-events.jsonl", help="JSONL file path, or '-' for stdout")
     parser.add_argument("--in-cluster", action="store_true", help="use the pod's ServiceAccount credentials")
     parser.add_argument("--http-timeout", type=float, default=2.0)
+    parser.add_argument("--prometheus-url", default="http://prometheus-service.ecomm.svc.cluster.local:9090")
+    parser.add_argument("--prometheus-timeout", type=float, default=3.0)
+    parser.add_argument("--sample-interval", type=float, default=10.0)
     args = parser.parse_args()
     Recorder(args).run()
 

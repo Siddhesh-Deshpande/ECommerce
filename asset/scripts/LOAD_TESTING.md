@@ -20,6 +20,15 @@ The k6 script measures four distinct plateaus: a 3 RPS baseline, a sustained 15 
 
 The four plateaus run through one `ramping-arrival-rate` scenario, so they share one VU pool instead of reserving a separate pool per phase. The pool is preallocated before measurement and k6 does not add VUs mid-run. Its default is calculated as `max(50, highest phase RPS × HTTP timeout × 1.2)`: at a highest phase rate of 50 RPS and a 5-second request timeout, that is 300 VUs. This is above the 250 concurrent requests implied by 50 RPS × 5 seconds, with 20% reserve. The HTTP timeout bounds a stuck iteration; requests that exceed it fail and remain visible in latency/error metrics. The one-second rate ramps fit inside the existing 30-second inter-phase gaps; requests in those gaps are tagged and reported as transition phases separately.
 
+For a diagnostic run at one target rate, set `TARGET_RPS`. This selects a single profile: warm-up, gradual ramp-up, target hold, then gradual ramp-down to zero. Phase durations are configurable in seconds. Example for one 15 RPS run:
+
+```bash
+TARGET_RPS=15 WARMUP_RATE=3 WARMUP_SECONDS=120 \
+RAMP_UP_SECONDS=300 HOLD_SECONDS=300 RAMP_DOWN_SECONDS=120 ./run.sh
+```
+
+Use a separate fresh database/Kafka state for each target-rate run. `run.sh` resets application replicas to one, but deliberately preserves PostgreSQL and Kafka persistent data. The observer records 10-second Prometheus samples for per-pod CPU, memory, CPU throttling, and Kafka consumer-group lag. The runner also captures node CPU/memory from `kubectl top` and a PostgreSQL connection-count time series. Pod readiness and HPA desired/current replica changes continue to be captured from Kubernetes watches. This single-target profile leaves the existing KEDA settings unchanged.
+
 The run fails k6's `dropped_iterations` threshold if it cannot start every scheduled iteration. A p95 threshold failure with zero dropped iterations means k6 delivered the configured arrivals and the service missed the 500ms latency SLO. A dropped-iteration failure means the requested load was not delivered, so compare the run's `load_generator` and per-phase arrival delivery fields before drawing service conclusions. `load-test-config.txt` records the script SHA-256 and exact VU/rate settings so a VM run can be checked against the script version.
 
 The Coordinator and Order ScaledObjects can each reach five replicas; Inventory and Payment can each reach three. Each app pod caps its Hikari pool at five connections, limiting the application maximum to 80 connections across those 16 replicas and leaving PostgreSQL headroom for operations and reporting. Watch for pending pods, PostgreSQL connection saturation, and lock contention when interpreting a run.

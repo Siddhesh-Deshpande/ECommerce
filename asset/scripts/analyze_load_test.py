@@ -63,7 +63,90 @@ def summarize_latency(values):
     }
 
 
-def read_workflows(path, phase_starts):
+def summarize_runtime_metrics(records):
+    grouped = defaultdict(list)
+    metric_units = {
+        "container_cpu_cores": "cores",
+        "container_memory_working_set_bytes": "bytes",
+        "container_cpu_throttled_period_ratio": "ratio",
+        "kafka_consumer_group_lag": "messages",
+    }
+    for record in records:
+        metric = record.get("metric")
+        labels = record.get("labels", {})
+        if not metric:
+            continue
+        label_key = tuple(sorted((key, value) for key, value in labels.items()))
+        grouped[(metric, label_key)].append((float(record["value"]), record.get("observed_at")))
+    result = {}
+    for (metric, label_key), observations in sorted(grouped.items()):
+        values = [item[0] for item in observations]
+        peak = max(observations, key=lambda item: item[0])
+        result.setdefault(metric, {"unit": metric_units.get(metric), "series": []})
+        result[metric]["series"].append({
+            "labels": dict(label_key),
+            "samples": len(values),
+            "mean": sum(values) / len(values),
+            "p95": percentile(values, 95),
+            "max": max(values),
+            "max_observed_at": peak[1],
+        })
+    return result
+
+
+def summarize_postgres_connections(path):
+    if not path or not Path(path).exists():
+        return {"samples": 0, "maximum_connections": None, "maximum_utilization_percent": None}
+    samples = []
+    with open(path, newline="", encoding="utf-8") as stream:
+        for row in csv.DictReader(stream):
+            try:
+                samples.append({
+                    "sampled_at_utc": row["sampled_at_utc"],
+                    "max_connections": int(row["max_connections"]),
+                    "client_connections": int(row["client_connections"]),
+                    "active_connections": int(row["active_connections"]),
+                })
+            except (KeyError, ValueError):
+                continue
+    peak = max(samples, key=lambda item: item["client_connections"], default=None)
+    return {
+        "samples": len(samples),
+        "maximum_connections": peak["client_connections"] if peak else None,
+        "maximum_utilization_percent": (
+            peak["client_connections"] * 100 / peak["max_connections"]
+            if peak and peak["max_connections"] else None
+        ),
+        "peak_sample": peak,
+    }
+
+
+def summarize_node_resources(path):
+    if not path or not Path(path).exists():
+        return {"samples": 0, "peak_cpu_percent": None, "peak_memory_percent": None}
+    rows = []
+    with open(path, newline="", encoding="utf-8") as stream:
+        for row in csv.DictReader(stream):
+            try:
+                rows.append({
+                    **row,
+                    "cpu_percent_value": float(row["cpu_percent"].rstrip("%")),
+                    "memory_percent_value": float(row["memory_percent"].rstrip("%")),
+                })
+            except (KeyError, ValueError):
+                continue
+    peak_cpu = max(rows, key=lambda item: item["cpu_percent_value"], default=None)
+    peak_memory = max(rows, key=lambda item: item["memory_percent_value"], default=None)
+    return {
+        "samples": len(rows),
+        "peak_cpu_percent": peak_cpu["cpu_percent_value"] if peak_cpu else None,
+        "peak_cpu_sample": peak_cpu,
+        "peak_memory_percent": peak_memory["memory_percent_value"] if peak_memory else None,
+        "peak_memory_sample": peak_memory,
+    }
+
+
+def read_workflows(path, phase_starts, phase_durations=None):
     """Group durable Coordinator rows by their k6 submission phase."""
     result = defaultdict(list)
     if path is None:
@@ -75,7 +158,7 @@ def read_workflows(path, phase_starts):
             if not submitted_at:
                 continue
             for phase, start in phase_starts.items():
-                duration = phase_duration_seconds(phase)
+                duration = (phase_durations or {}).get(phase) or phase_duration_seconds(phase)
                 if duration is None:
                     continue
                 end = start.timestamp() + duration
@@ -117,6 +200,7 @@ def load_json_lines(path, ignore_non_json=False, ignored_counter=None):
 
 def read_k6(path):
     phase_starts = {}
+    phase_durations = {}
     phase_latencies = defaultdict(list)
     phase_failures = defaultdict(list)
     phase_e2e_latencies = defaultdict(list)
@@ -143,6 +227,8 @@ def read_k6(path):
         if metric == "load_phase_marker" and phase:
             scheduled_start = parse_time(tags.get("phase_start_utc")) or sample_time
             phase_starts[phase] = min(phase_starts.get(phase, scheduled_start), scheduled_start)
+            if tags.get("phase_duration_seconds"):
+                phase_durations[phase] = float(tags["phase_duration_seconds"])
             phase_markers[phase] += int(data.get("value", 0))
         elif metric == "http_req_duration" and tags.get("endpoint") == "order-submission":
             latency = float(data.get("value", 0))
@@ -177,12 +263,13 @@ def read_k6(path):
     return (phase_starts, phase_latencies, phase_failures, all_http_samples,
             phase_e2e_latencies, phase_lookup_latencies, phase_submission_errors,
             phase_completion_errors, phase_submitted, phase_completed, phase_markers,
-            dropped_by_scenario, max_active_vus, max_initialized_vus)
+            dropped_by_scenario, max_active_vus, max_initialized_vus, phase_durations)
 
 
 def summarize_requests(phase_starts, phase_latencies, phase_failures, phase_e2e_latencies,
                        phase_lookup_latencies, phase_submission_errors, phase_completion_errors,
-                       phase_submitted, phase_completed, phase_markers, phase_rates, phase_workflows):
+                       phase_submitted, phase_completed, phase_markers, phase_rates, phase_workflows,
+                       phase_durations=None):
     result = {}
     phases = set(phase_starts) | set(phase_latencies) | set(phase_workflows)
     for phase in sorted(phases, key=lambda name: phase_starts.get(name, datetime.max.replace(tzinfo=timezone.utc))):
@@ -204,7 +291,7 @@ def summarize_requests(phase_starts, phase_latencies, phase_failures, phase_e2e_
         workflow_completed = sum(workflow["state"] == "COMPLETED" for workflow in workflows)
         workflow_aborted = sum(workflow["state"] == "ABORTED" for workflow in workflows)
         workflow_pending = len(workflows) - workflow_completed - workflow_aborted
-        duration = phase_duration_seconds(phase)
+        duration = (phase_durations or {}).get(phase) or phase_duration_seconds(phase)
         target_rate = phase_rates.get(phase)
         scheduled_iterations = target_rate * duration if target_rate is not None and duration else None
         result[phase] = {
@@ -335,6 +422,8 @@ def read_kubernetes(path):
     app_ready_metrics = {}
     scaledobjects = {}
     collector_gaps = []
+    runtime_metric_samples = []
+    runtime_metric_errors = []
     for record in records:
         kind = record.get("resource")
         if kind == "pod":
@@ -349,9 +438,14 @@ def read_kubernetes(path):
             app_ready_metrics[record.get("pod_uid")] = record
         elif record.get("record_type") == "collector_gap":
             collector_gaps.append(record)
+        elif record.get("record_type") == "runtime_metric_sample":
+            runtime_metric_samples.append(record)
+        elif record.get("record_type") == "runtime_metric_error":
+            runtime_metric_errors.append(record)
     for history in (*pods.values(), *hpas.values(), *deployments.values()):
         history.sort(key=lambda item: parse_time(item.get("observed_at")) or datetime.min.replace(tzinfo=timezone.utc))
-    return pods, hpas, deployments, app_ready_metrics, scaledobjects, collector_gaps, ignored_lines["count"]
+    return (pods, hpas, deployments, app_ready_metrics, scaledobjects, collector_gaps,
+            ignored_lines["count"], runtime_metric_samples, runtime_metric_errors)
 
 
 def summarize_pods(pods, app_ready_metrics, measurement_start):
@@ -464,7 +558,7 @@ def metric_over_target(hpa_record):
     return False
 
 
-def summarize_scaling(phase_starts, pods, hpas, deployments):
+def summarize_scaling(phase_starts, pods, hpas, deployments, phase_durations=None):
     output = {}
     deployment_selectors = {}
     for deployment_name, history in deployments.items():
@@ -486,7 +580,7 @@ def summarize_scaling(phase_starts, pods, hpas, deployments):
     for phase, phase_start in sorted(phase_starts.items(), key=lambda item: item[1]):
         phase_data = {}
         start_ms = phase_start.timestamp() * 1000
-        phase_duration = phase_duration_seconds(phase)
+        phase_duration = (phase_durations or {}).get(phase) or phase_duration_seconds(phase)
         end_ms = start_ms + phase_duration * 1000 if phase_duration is not None else None
         for deployment_name, hpa_history in hpas.items():
             hpa_history.sort(key=lambda item: parse_time(item.get("observed_at")) or datetime.min.replace(tzinfo=timezone.utc))
@@ -565,6 +659,8 @@ def main():
     parser.add_argument("--k6", required=True, help="k6 JSON output file from --out json=...")
     parser.add_argument("--kubernetes", required=True, help="collector JSONL output")
     parser.add_argument("--workflows", help="CSV snapshot of Coordinator workflow timestamps from PostgreSQL")
+    parser.add_argument("--postgres-connections", help="CSV time series of PostgreSQL connection samples")
+    parser.add_argument("--node-resources", help="CSV time series from kubectl top nodes")
     parser.add_argument("--output", default="load-test-summary.json")
     parser.add_argument("--slo-p95-ms", type=float, default=500)
     parser.add_argument("--slo-window-seconds", type=int, default=30)
@@ -572,6 +668,8 @@ def main():
     parser.add_argument("--slo-stable-windows", type=int, default=2)
     parser.add_argument("--burst-rate", type=int, default=15)
     parser.add_argument("--peak-rate", type=int, default=50)
+    parser.add_argument("--target-rps", type=int, default=0)
+    parser.add_argument("--warmup-rate", type=int, default=3)
     parser.add_argument("--preallocated-vus", type=int, default=300)
     parser.add_argument("--http-timeout-seconds", type=int, default=5)
     parser.add_argument("--vu-safety-factor", type=float, default=1.2)
@@ -582,12 +680,12 @@ def main():
     (phase_starts, phase_latencies, phase_failures, request_samples, phase_e2e_latencies,
      phase_lookup_latencies, phase_submission_errors, phase_completion_errors,
      phase_submitted, phase_completed, phase_markers, dropped_by_scenario,
-     max_active_vus, max_initialized_vus) = read_k6(args.k6)
+     max_active_vus, max_initialized_vus, phase_durations) = read_k6(args.k6)
     if not phase_starts:
         raise SystemExit("No measured-phase POST samples found in k6 JSON output; check the test script and endpoint tags.")
     (pods, hpas, deployments, app_ready_metrics, scaledobjects, collector_gaps,
-     collector_log_lines_ignored) = read_kubernetes(args.kubernetes)
-    phase_workflows = read_workflows(args.workflows, phase_starts)
+     collector_log_lines_ignored, runtime_metric_samples, runtime_metric_errors) = read_kubernetes(args.kubernetes)
+    phase_workflows = read_workflows(args.workflows, phase_starts, phase_durations)
     violations, slo_windows = slo_episodes(
         request_samples,
         args.slo_window_seconds,
@@ -595,16 +693,24 @@ def main():
         args.slo_min_requests,
         args.slo_stable_windows,
     )
-    burst_phase = f"burst_{args.burst_rate}_rps"
-    phase_rates = {
-        "baseline": 3,
-        "transition_baseline_to_burst": None,
-        burst_phase: args.burst_rate,
-        "transition_burst_to_peak": None,
-        "peak_burst": args.peak_rate,
-        "transition_peak_to_recovery": None,
-        "recovery": 3,
-    }
+    if args.target_rps > 0:
+        phase_rates = {
+            "warmup": args.warmup_rate,
+            "ramp_up": None,
+            "target_hold": args.target_rps,
+            "ramp_down": None,
+        }
+    else:
+        burst_phase = f"burst_{args.burst_rate}_rps"
+        phase_rates = {
+            "baseline": 3,
+            "transition_baseline_to_burst": None,
+            burst_phase: args.burst_rate,
+            "transition_burst_to_peak": None,
+            "peak_burst": args.peak_rate,
+            "transition_peak_to_recovery": None,
+            "recovery": 3,
+        }
     total_dropped_iterations = sum(dropped_by_scenario.values())
     request_attempts_by_phase = {
         phase: len(values) for phase, values in phase_latencies.items()
@@ -630,6 +736,7 @@ def main():
             phase_starts, phase_latencies, phase_failures, phase_e2e_latencies,
             phase_lookup_latencies, phase_submission_errors, phase_completion_errors,
             phase_submitted, phase_completed, phase_markers, phase_rates, phase_workflows,
+            phase_durations,
         ),
         "load_generator": {
             "executor": "one ramping-arrival-rate scenario with a fixed preallocated VU pool",
@@ -645,13 +752,15 @@ def main():
             "all_scheduled_arrivals_started": total_dropped_iterations == 0,
             "phase_request_attempts": request_attempts_by_phase,
             "target_rates_requests_per_second": phase_rates,
+            "phase_durations_seconds": phase_durations,
         },
         "slo_violations": violations,
         "slo_windows": slo_windows,
         "pod_startup": summarize_pods(pods, app_ready_metrics, min(phase_starts.values())),
         "scale_up": summarize_scaling(
-            {phase: start for phase, start in phase_starts.items() if phase in phase_rates and phase_rates[phase] is not None},
-            pods, hpas, deployments,
+            {phase: start for phase, start in phase_starts.items()
+             if phase in phase_rates and (phase_rates[phase] is not None or phase == "ramp_up")},
+            pods, hpas, deployments, phase_durations,
         ),
         "deployment_configuration": {
             name: history[-1]
@@ -670,12 +779,18 @@ def main():
         },
         "keda_scaledobjects_observed": sorted(scaledobjects.keys()),
         "collector_gaps": collector_gaps,
+        "runtime_metrics": summarize_runtime_metrics(runtime_metric_samples),
+        "runtime_metric_sample_errors": runtime_metric_errors,
+        "postgres_connections": summarize_postgres_connections(args.postgres_connections),
+        "node_resources": summarize_node_resources(args.node_resources),
         "collector_non_json_log_lines_ignored": collector_log_lines_ignored,
         "source_counts": {
             "pods": len(pods),
             "hpas": len(hpas),
             "deployments": len(deployments),
             "spring_application_ready_timestamps": len(app_ready_metrics),
+            "runtime_metric_samples": len(runtime_metric_samples),
+            "runtime_metric_sample_errors": len(runtime_metric_errors),
         },
     }
     output = Path(args.output)

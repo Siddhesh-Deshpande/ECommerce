@@ -14,6 +14,12 @@ SLO_WINDOW_SECONDS="${SLO_WINDOW_SECONDS:-30}"
 SLO_MIN_REQUESTS="${SLO_MIN_REQUESTS:-30}"
 BURST_RATE="${BURST_RATE:-15}"
 PEAK_RATE="${PEAK_RATE:-50}"
+TARGET_RPS="${TARGET_RPS:-}"
+WARMUP_RATE="${WARMUP_RATE:-3}"
+WARMUP_SECONDS="${WARMUP_SECONDS:-120}"
+RAMP_UP_SECONDS="${RAMP_UP_SECONDS:-300}"
+HOLD_SECONDS="${HOLD_SECONDS:-300}"
+RAMP_DOWN_SECONDS="${RAMP_DOWN_SECONDS:-120}"
 HTTP_TIMEOUT_SECONDS="${HTTP_TIMEOUT_SECONDS:-5}"
 VU_SAFETY_FACTOR="${VU_SAFETY_FACTOR:-1.2}"
 PREALLOCATED_VUS="${PREALLOCATED_VUS:-}"
@@ -39,7 +45,7 @@ usage() {
 Usage: ./run.sh [--yes] [--deploy-only] [--skip-deploy]
 
 Default: apply infrastructure and app manifests, refresh the app deployments,
-start the Kubernetes metrics observer, run the four-phase k6 workload, and
+start the Kubernetes metrics observer, run the k6 workload, and
 write a JSON metrics report under results/<UTC timestamp>/.
 
 Options:
@@ -51,6 +57,12 @@ Options:
 Environment:
   METRICS_COLLECTOR_IMAGE  Registry image for non-Minikube/non-Kind clusters.
   BURST_RATE / PEAK_RATE   k6 phase rates (defaults: 15 and 50 iterations/s).
+  TARGET_RPS               Run one target with a ramp profile instead of both burst phases.
+  WARMUP_RATE              Single-target warm-up rate (default: 3 RPS).
+  WARMUP_SECONDS           Single-target warm-up duration (default: 120).
+  RAMP_UP_SECONDS          Single-target ramp duration (default: 300).
+  HOLD_SECONDS             Single-target target-rate hold (default: 300).
+  RAMP_DOWN_SECONDS        Single-target ramp-down duration (default: 120).
   PREALLOCATED_VUS         One shared k6 VU pool; default is calculated from the highest
                            rate, request timeout, and a 20% reserve.
   HTTP_TIMEOUT_SECONDS     Coordinator POST timeout (default: 5).
@@ -82,13 +94,24 @@ log() { printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 if (( ! DEPLOY_ONLY )); then
-  [[ "$BURST_RATE" =~ ^[1-9][0-9]*$ ]] || die "BURST_RATE must be a positive integer."
-  [[ "$PEAK_RATE" =~ ^[1-9][0-9]*$ ]] || die "PEAK_RATE must be a positive integer."
+  if [[ -n "$TARGET_RPS" ]]; then
+    [[ "$TARGET_RPS" =~ ^[1-9][0-9]*$ ]] || die "TARGET_RPS must be a positive integer."
+    for duration in "$WARMUP_SECONDS" "$RAMP_UP_SECONDS" "$HOLD_SECONDS" "$RAMP_DOWN_SECONDS"; do
+      [[ "$duration" =~ ^[1-9][0-9]*$ ]] || die "Single-target phase durations must be positive integer seconds."
+    done
+    [[ "$WARMUP_RATE" =~ ^[1-9][0-9]*$ ]] || die "WARMUP_RATE must be a positive integer."
+    HIGHEST_ARRIVAL_RATE="$(awk -v target="$TARGET_RPS" -v warmup="$WARMUP_RATE" 'BEGIN { print (target > warmup ? target : warmup) }')"
+    LOAD_PROFILE="single target ${TARGET_RPS} RPS: warmup ${WARMUP_RATE} RPS, ramp ${RAMP_UP_SECONDS}s, hold ${HOLD_SECONDS}s, ramp-down ${RAMP_DOWN_SECONDS}s"
+  else
+    [[ "$BURST_RATE" =~ ^[1-9][0-9]*$ ]] || die "BURST_RATE must be a positive integer."
+    [[ "$PEAK_RATE" =~ ^[1-9][0-9]*$ ]] || die "PEAK_RATE must be a positive integer."
+    HIGHEST_ARRIVAL_RATE="$(awk -v burst="$BURST_RATE" -v peak="$PEAK_RATE" 'BEGIN { print (burst > peak ? burst : peak) }')"
+    LOAD_PROFILE="legacy profile: ${BURST_RATE} RPS burst, ${PEAK_RATE} RPS peak"
+  fi
   [[ "$HTTP_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "HTTP_TIMEOUT_SECONDS must be a positive integer."
   if ! awk -v factor="$VU_SAFETY_FACTOR" 'BEGIN { exit !(factor >= 1) }'; then
     die "VU_SAFETY_FACTOR must be a number greater than or equal to 1."
   fi
-  HIGHEST_ARRIVAL_RATE="$(awk -v burst="$BURST_RATE" -v peak="$PEAK_RATE" 'BEGIN { print (burst > peak ? burst : peak) }')"
   REQUIRED_PREALLOCATED_VUS="$(awk -v rate="$HIGHEST_ARRIVAL_RATE" -v timeout="$HTTP_TIMEOUT_SECONDS" -v factor="$VU_SAFETY_FACTOR" \
     'BEGIN { needed = rate * timeout * factor; if (needed < 50) needed = 50; printf "%d", int(needed + 0.999999) }')"
   if [[ -z "$PREALLOCATED_VUS" ]]; then
@@ -121,6 +144,38 @@ postgres_psql() {
   done
   cat "$error_file" >&2
   return 1
+}
+
+start_postgres_connection_sampler() {
+  local output_file="$RESULTS_DIR/postgres-connection-samples.csv"
+  printf 'sampled_at_utc,max_connections,client_connections,active_connections\n' >"$output_file"
+  (
+    while :; do
+      local sample
+      sample="$(postgres_psql -d postgres --csv -t -v ON_ERROR_STOP=1 \
+        -c "SELECT current_setting('max_connections')::int, count(*) FILTER (WHERE backend_type = 'client backend'), count(*) FILTER (WHERE backend_type = 'client backend' AND state = 'active') FROM pg_stat_activity;")" || sample=""
+      if [[ -n "$sample" ]]; then
+        printf '%s,%s\n' "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" "$sample" >>"$output_file"
+      fi
+      sleep 10
+    done
+  ) >/dev/null 2>>"$RESULTS_DIR/postgres-sampler-stderr.log" &
+  PIDS+=("$!")
+}
+
+start_node_resource_sampler() {
+  local output_file="$RESULTS_DIR/node-resource-samples.csv"
+  printf 'sampled_at_utc,node,cpu_usage,cpu_percent,memory_usage,memory_percent\n' >"$output_file"
+  (
+    while :; do
+      local sampled_at
+      sampled_at="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+      kubectl top nodes --no-headers 2>>"$RESULTS_DIR/node-sampler-stderr.log" \
+        | awk -v sampled_at="$sampled_at" 'NF >= 5 { print sampled_at "," $1 "," $2 "," $3 "," $4 "," $5 }' >>"$output_file" || true
+      sleep 10
+    done
+  ) >/dev/null 2>&1 &
+  PIDS+=("$!")
 }
 
 cleanup() {
@@ -295,13 +350,16 @@ fi
 
 mkdir -p "$RESULTS_DIR"
 log "Saving experiment artifacts to $RESULTS_DIR"
-log "Load profile: one ramping-arrival-rate scenario, ${BURST_RATE} RPS burst, ${PEAK_RATE} RPS peak, ${PREALLOCATED_VUS} preallocated VUs, ${HTTP_TIMEOUT_SECONDS}s request timeout."
+log "Load profile: ${LOAD_PROFILE}; ${PREALLOCATED_VUS} preallocated VUs, ${HTTP_TIMEOUT_SECONDS}s request timeout."
 log "The single VU pool is sized as highest phase rate × request timeout × ${VU_SAFETY_FACTOR}; k6 will not allocate VUs dynamically."
 {
   printf 'run_id=%s\n' "$RUN_ID"
   printf 'load_script_sha256=%s\n' "$(sha256sum "$ROOT_DIR/asset/scripts/load_testing.js" | awk '{print $1}')"
   printf 'k6_version=%s\n' "$(k6 version 2>&1 | head -n1)"
-  printf 'burst_rate_rps=%s\npeak_rate_rps=%s\n' "$BURST_RATE" "$PEAK_RATE"
+  printf 'profile_mode=%s\n' "$([[ -n "$TARGET_RPS" ]] && echo single_target || echo legacy)"
+  printf 'burst_rate_rps=%s\npeak_rate_rps=%s\ntarget_rps=%s\n' "$BURST_RATE" "$PEAK_RATE" "$TARGET_RPS"
+  printf 'warmup_rate_rps=%s\nwarmup_seconds=%s\nramp_up_seconds=%s\nhold_seconds=%s\nramp_down_seconds=%s\n' \
+    "$WARMUP_RATE" "$WARMUP_SECONDS" "$RAMP_UP_SECONDS" "$HOLD_SECONDS" "$RAMP_DOWN_SECONDS"
   printf 'preallocated_vus=%s\nmax_vus=%s\nhttp_timeout_seconds=%s\nvu_safety_factor=%s\n' \
     "$PREALLOCATED_VUS" "$PREALLOCATED_VUS" "$HTTP_TIMEOUT_SECONDS" "$VU_SAFETY_FACTOR"
 } >"$RESULTS_DIR/load-test-config.txt"
@@ -358,6 +416,8 @@ if [[ ! -s "$RESULTS_DIR/kubernetes-events.jsonl" ]]; then
   echo "Metrics observer has not emitted any JSONL records; see $RESULTS_DIR/collector-stderr.log" >&2
   die "Stopping before k6 so the run cannot produce a report with missing Kubernetes metrics."
 fi
+start_postgres_connection_sampler
+start_node_resource_sampler
 
 if [[ "$CONTEXT" == *minikube* ]]; then
   # Use NodePorts for the load generator. Port-forward opens one API-server
@@ -375,7 +435,7 @@ else
 fi
 log "Coordinator load-test URL: $COORDINATOR_URL"
 
-log "Running submission-only k6 phases: baseline, ${BURST_RATE} RPS burst, ${PEAK_RATE} RPS peak, recovery."
+log "Running submission-only k6 profile: ${LOAD_PROFILE}."
 K6_START_AT="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
 set +e
 k6 run \
@@ -383,6 +443,12 @@ k6 run \
   --summary-export="${RESULTS_DIR}/k6-summary.json" \
   -e "BURST_RATE=${BURST_RATE}" \
   -e "PEAK_RATE=${PEAK_RATE}" \
+  -e "TARGET_RPS=${TARGET_RPS}" \
+  -e "WARMUP_RATE=${WARMUP_RATE}" \
+  -e "WARMUP_SECONDS=${WARMUP_SECONDS}" \
+  -e "RAMP_UP_SECONDS=${RAMP_UP_SECONDS}" \
+  -e "HOLD_SECONDS=${HOLD_SECONDS}" \
+  -e "RAMP_DOWN_SECONDS=${RAMP_DOWN_SECONDS}" \
   -e "HTTP_TIMEOUT_SECONDS=${HTTP_TIMEOUT_SECONDS}" \
   -e "VU_SAFETY_FACTOR=${VU_SAFETY_FACTOR}" \
   -e "PREALLOCATED_VUS=${PREALLOCATED_VUS}" \
@@ -446,12 +512,16 @@ python3 "$ROOT_DIR/asset/scripts/analyze_load_test.py" \
   --k6 "$RESULTS_DIR/k6.jsonl" \
   --kubernetes "$RESULTS_DIR/kubernetes-events.jsonl" \
   --workflows "$RESULTS_DIR/coordinator-workflows.csv" \
+  --postgres-connections "$RESULTS_DIR/postgres-connection-samples.csv" \
+  --node-resources "$RESULTS_DIR/node-resource-samples.csv" \
   --output "$RESULTS_DIR/metrics-report.json" \
   --slo-p95-ms "$SLO_P95_MS" \
   --slo-window-seconds "$SLO_WINDOW_SECONDS" \
   --slo-min-requests "$SLO_MIN_REQUESTS" \
   --burst-rate "$BURST_RATE" \
   --peak-rate "$PEAK_RATE" \
+  --target-rps "${TARGET_RPS:-0}" \
+  --warmup-rate "$WARMUP_RATE" \
   --preallocated-vus "$PREALLOCATED_VUS" \
   --http-timeout-seconds "$HTTP_TIMEOUT_SECONDS" \
   --vu-safety-factor "$VU_SAFETY_FACTOR"
