@@ -42,6 +42,20 @@ PROMETHEUS_QUERIES = {
         'sum by (consumergroup, topic) (kafka_consumergroup_lag'
         '{topic=~"coor-service|order-service|inventory-service|payment-service"})'
     ),
+    # Keep partition labels so the report can show whether KEDA's
+    # limitToPartitionsWithLag setting is restricting consumer replicas.
+    "kafka_consumer_group_partition_lag": (
+        'kafka_consumergroup_lag'
+        '{topic=~"coor-service|order-service|inventory-service|payment-service"}'
+    ),
+    "kafka_consumer_group_lagging_partition_count": (
+        'sum by (consumergroup, topic) (kafka_consumergroup_lag'
+        '{topic=~"coor-service|order-service|inventory-service|payment-service"} > bool 0)'
+    ),
+    "kafka_topic_partition_count": (
+        'count by (topic) (kafka_topic_partition_current_offset'
+        '{topic=~"coor-service|order-service|inventory-service|payment-service"})'
+    ),
 }
 
 

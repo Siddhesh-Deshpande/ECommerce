@@ -70,6 +70,9 @@ def summarize_runtime_metrics(records):
         "container_memory_working_set_bytes": "bytes",
         "container_cpu_throttled_period_ratio": "ratio",
         "kafka_consumer_group_lag": "messages",
+        "kafka_consumer_group_partition_lag": "messages",
+        "kafka_consumer_group_lagging_partition_count": "partitions",
+        "kafka_topic_partition_count": "partitions",
     }
     for record in records:
         metric = record.get("metric")
