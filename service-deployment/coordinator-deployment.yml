@@ -54,6 +54,8 @@ spec:
               value: "kafka-service.ecomm.svc.cluster.local:9092"
             - name: SPRING_DATASOURCE_URL
               value: "jdbc:postgresql://postgres-service.ecomm.svc.cluster.local:5432/coordinator_db"
+            - name: SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE
+              value: "5"
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:

@@ -12,10 +12,20 @@ from pathlib import Path
 
 PHASE_DURATIONS_SECONDS = {
     "baseline": 120,
-    "burst_15_rps": 300,
+    "transition_baseline_to_burst": 30,
+    "transition_burst_to_peak": 30,
+    "transition_peak_to_recovery": 30,
     "peak_burst": 300,
     "recovery": 120,
 }
+
+
+def phase_duration_seconds(phase):
+    if phase in PHASE_DURATIONS_SECONDS:
+        return PHASE_DURATIONS_SECONDS[phase]
+    if phase.startswith("burst_") and phase.endswith("_rps"):
+        return 300
+    return None
 
 
 def parse_time(value):
@@ -65,7 +75,10 @@ def read_workflows(path, phase_starts):
             if not submitted_at:
                 continue
             for phase, start in phase_starts.items():
-                end = start.timestamp() + PHASE_DURATIONS_SECONDS.get(phase, 0)
+                duration = phase_duration_seconds(phase)
+                if duration is None:
+                    continue
+                end = start.timestamp() + duration
                 if start.timestamp() <= submitted_at.timestamp() < end:
                     completed_at = parse_time(row.get("completed_at"))
                     result[phase].append({
@@ -107,7 +120,10 @@ def read_k6(path):
     phase_completion_errors = defaultdict(list)
     phase_submitted = defaultdict(int)
     phase_completed = defaultdict(int)
-    phase_dropped = defaultdict(int)
+    phase_markers = defaultdict(int)
+    dropped_by_scenario = defaultdict(int)
+    max_active_vus = 0
+    max_initialized_vus = 0
     all_http_samples = []
     for point in load_json_lines(path):
         if point.get("type") != "Point":
@@ -120,7 +136,9 @@ def read_k6(path):
             continue
         phase = tags.get("phase")
         if metric == "load_phase_marker" and phase:
-            phase_starts[phase] = min(phase_starts.get(phase, sample_time), sample_time)
+            scheduled_start = parse_time(tags.get("phase_start_utc")) or sample_time
+            phase_starts[phase] = min(phase_starts.get(phase, scheduled_start), scheduled_start)
+            phase_markers[phase] += int(data.get("value", 0))
         elif metric == "http_req_duration" and tags.get("endpoint") == "order-submission":
             latency = float(data.get("value", 0))
             all_http_samples.append((sample_time, latency))
@@ -146,16 +164,20 @@ def read_k6(path):
             phase_completed[phase] += int(data.get("value", 0))
         elif metric == "dropped_iterations":
             scenario = tags.get("scenario")
-            if scenario:
-                phase_dropped[scenario] += int(data.get("value", 0))
+            dropped_by_scenario[scenario or "unattributed"] += int(data.get("value", 0))
+        elif metric == "vus":
+            max_active_vus = max(max_active_vus, int(data.get("value", 0)))
+        elif metric == "vus_max":
+            max_initialized_vus = max(max_initialized_vus, int(data.get("value", 0)))
     return (phase_starts, phase_latencies, phase_failures, all_http_samples,
             phase_e2e_latencies, phase_lookup_latencies, phase_submission_errors,
-            phase_completion_errors, phase_submitted, phase_completed, phase_dropped)
+            phase_completion_errors, phase_submitted, phase_completed, phase_markers,
+            dropped_by_scenario, max_active_vus, max_initialized_vus)
 
 
 def summarize_requests(phase_starts, phase_latencies, phase_failures, phase_e2e_latencies,
                        phase_lookup_latencies, phase_submission_errors, phase_completion_errors,
-                       phase_submitted, phase_completed, phase_dropped, phase_workflows):
+                       phase_submitted, phase_completed, phase_markers, phase_rates, phase_workflows):
     result = {}
     phases = set(phase_starts) | set(phase_latencies) | set(phase_workflows)
     for phase in sorted(phases, key=lambda name: phase_starts.get(name, datetime.max.replace(tzinfo=timezone.utc))):
@@ -169,10 +191,18 @@ def summarize_requests(phase_starts, phase_latencies, phase_failures, phase_e2e_
         workflow_completed = sum(workflow["state"] == "COMPLETED" for workflow in workflows)
         workflow_aborted = sum(workflow["state"] == "ABORTED" for workflow in workflows)
         workflow_pending = len(workflows) - workflow_completed - workflow_aborted
-        duration = PHASE_DURATIONS_SECONDS.get(phase)
+        duration = phase_duration_seconds(phase)
+        target_rate = phase_rates.get(phase)
+        scheduled_iterations = target_rate * duration if target_rate is not None and duration else None
         result[phase] = {
             "samples": len(values),
             "throughput_requests_per_second": len(values) / duration if duration else None,
+            "target_rate_requests_per_second": target_rate,
+            "scheduled_iterations": scheduled_iterations,
+            "phase_marker_iterations": phase_markers.get(phase, 0),
+            "arrival_delivery_percent": (
+                len(values) * 100 / scheduled_iterations if scheduled_iterations else None
+            ),
             "latency_ms": {
                 "mean": sum(values) / len(values) if values else None,
                 "p50": percentile(values, 50),
@@ -186,6 +216,9 @@ def summarize_requests(phase_starts, phase_latencies, phase_failures, phase_e2e_
             "orders_aborted": workflow_aborted,
             "workflows_non_terminal_at_snapshot": workflow_pending,
             "orders_not_completed_at_snapshot": len(workflows) - workflow_completed,
+            "completion_latency_coverage_percent": (
+                workflow_completed * 100 / len(workflows) if workflows else None
+            ),
             "submission_failure_rate": (
                 sum(phase_submission_errors.get(phase, [])) / len(phase_submission_errors[phase])
                 if phase_submission_errors.get(phase) else None
@@ -194,7 +227,6 @@ def summarize_requests(phase_starts, phase_latencies, phase_failures, phase_e2e_
                 (len(workflows) - workflow_completed) / len(workflows) if workflows else None
             ),
             "end_to_end_completion_latency_ms": summarize_latency(workflow_latencies),
-            "dropped_iterations": phase_dropped.get(phase, 0),
             "phase_start_utc": phase_starts[phase].isoformat() if phase in phase_starts else None,
         }
     return result
@@ -518,15 +550,21 @@ def main():
     parser.add_argument("--slo-window-seconds", type=int, default=30)
     parser.add_argument("--slo-min-requests", type=int, default=30)
     parser.add_argument("--slo-stable-windows", type=int, default=2)
+    parser.add_argument("--burst-rate", type=int, default=15)
+    parser.add_argument("--peak-rate", type=int, default=50)
+    parser.add_argument("--preallocated-vus", type=int, default=300)
+    parser.add_argument("--http-timeout-seconds", type=int, default=5)
+    parser.add_argument("--vu-safety-factor", type=float, default=1.2)
     args = parser.parse_args()
     if args.slo_window_seconds <= 0 or args.slo_min_requests <= 0 or args.slo_stable_windows <= 0:
         parser.error("SLO window, minimum request count, and stable-window count must be positive")
 
     (phase_starts, phase_latencies, phase_failures, request_samples, phase_e2e_latencies,
      phase_lookup_latencies, phase_submission_errors, phase_completion_errors,
-     phase_submitted, phase_completed, phase_dropped) = read_k6(args.k6)
+     phase_submitted, phase_completed, phase_markers, dropped_by_scenario,
+     max_active_vus, max_initialized_vus) = read_k6(args.k6)
     if not phase_starts:
-        raise SystemExit("No k6 load_phase_marker samples found; verify k6 JSON output and phase tags.")
+        raise SystemExit("No measured-phase POST samples found in k6 JSON output; check the test script and endpoint tags.")
     (pods, hpas, deployments, app_ready_metrics, scaledobjects, collector_gaps,
      collector_log_lines_ignored) = read_kubernetes(args.kubernetes)
     phase_workflows = read_workflows(args.workflows, phase_starts)
@@ -537,6 +575,20 @@ def main():
         args.slo_min_requests,
         args.slo_stable_windows,
     )
+    burst_phase = f"burst_{args.burst_rate}_rps"
+    phase_rates = {
+        "baseline": 3,
+        "transition_baseline_to_burst": None,
+        burst_phase: args.burst_rate,
+        "transition_burst_to_peak": None,
+        "peak_burst": args.peak_rate,
+        "transition_peak_to_recovery": None,
+        "recovery": 3,
+    }
+    total_dropped_iterations = sum(dropped_by_scenario.values())
+    request_attempts_by_phase = {
+        phase: len(values) for phase, values in phase_latencies.items()
+    }
     summary = {
         "method": {
             "latency_source": "k6 POST /ecomm/order http_req_duration samples only",
@@ -557,12 +609,30 @@ def main():
         "requests_by_phase": summarize_requests(
             phase_starts, phase_latencies, phase_failures, phase_e2e_latencies,
             phase_lookup_latencies, phase_submission_errors, phase_completion_errors,
-            phase_submitted, phase_completed, phase_dropped, phase_workflows,
+            phase_submitted, phase_completed, phase_markers, phase_rates, phase_workflows,
         ),
+        "load_generator": {
+            "executor": "one ramping-arrival-rate scenario with a fixed preallocated VU pool",
+            "scenario": "load_profile",
+            "preallocated_vus": args.preallocated_vus,
+            "max_vus": args.preallocated_vus,
+            "maximum_active_vus_observed": max_active_vus,
+            "maximum_initialized_vus_observed": max_initialized_vus,
+            "http_timeout_seconds": args.http_timeout_seconds,
+            "vu_safety_factor": args.vu_safety_factor,
+            "dropped_iterations_by_scenario": dict(dropped_by_scenario),
+            "total_dropped_iterations": total_dropped_iterations,
+            "all_scheduled_arrivals_started": total_dropped_iterations == 0,
+            "phase_request_attempts": request_attempts_by_phase,
+            "target_rates_requests_per_second": phase_rates,
+        },
         "slo_violations": violations,
         "slo_windows": slo_windows,
         "pod_startup": summarize_pods(pods, app_ready_metrics, min(phase_starts.values())),
-        "scale_up": summarize_scaling(phase_starts, pods, hpas, deployments),
+        "scale_up": summarize_scaling(
+            {phase: start for phase, start in phase_starts.items() if phase in phase_rates and phase_rates[phase] is not None},
+            pods, hpas, deployments,
+        ),
         "deployment_configuration": {
             name: history[-1]
             for name, history in deployments.items()

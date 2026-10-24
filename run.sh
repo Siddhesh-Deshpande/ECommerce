@@ -14,9 +14,10 @@ SLO_WINDOW_SECONDS="${SLO_WINDOW_SECONDS:-30}"
 SLO_MIN_REQUESTS="${SLO_MIN_REQUESTS:-30}"
 BURST_RATE="${BURST_RATE:-15}"
 PEAK_RATE="${PEAK_RATE:-50}"
-PREALLOCATED_VUS="${PREALLOCATED_VUS:-50}"
-MAX_VUS="${MAX_VUS:-100}"
-WORKFLOW_DRAIN_TIMEOUT_SECONDS="${WORKFLOW_DRAIN_TIMEOUT_SECONDS:-300}"
+HTTP_TIMEOUT_SECONDS="${HTTP_TIMEOUT_SECONDS:-5}"
+VU_SAFETY_FACTOR="${VU_SAFETY_FACTOR:-1.2}"
+PREALLOCATED_VUS="${PREALLOCATED_VUS:-}"
+WORKFLOW_DRAIN_TIMEOUT_SECONDS="${WORKFLOW_DRAIN_TIMEOUT_SECONDS:-900}"
 WORKFLOW_DRAIN_POLL_SECONDS="${WORKFLOW_DRAIN_POLL_SECONDS:-5}"
 LOAD_TEST_USER_IDS="${LOAD_TEST_USER_IDS:-1,2,3,4,5,6,7,8,9,10,11,12}"
 LOAD_TEST_ITEM_IDS="${LOAD_TEST_ITEM_IDS:-1,2,3,4,5,6,7,8,9,10,11,12}"
@@ -50,7 +51,10 @@ Options:
 Environment:
   METRICS_COLLECTOR_IMAGE  Registry image for non-Minikube/non-Kind clusters.
   BURST_RATE / PEAK_RATE   k6 phase rates (defaults: 15 and 50 iterations/s).
-  WORKFLOW_DRAIN_TIMEOUT_SECONDS  Post-load wait for terminal workflows (default: 300).
+  PREALLOCATED_VUS         One shared k6 VU pool; default is calculated from the highest
+                           rate, request timeout, and a 20% reserve.
+  HTTP_TIMEOUT_SECONDS     Coordinator POST timeout (default: 5).
+  WORKFLOW_DRAIN_TIMEOUT_SECONDS  Post-load wait for terminal workflows (default: 900).
   RESULTS_ROOT             Output root (default: ./results).
   LOAD_TEST_USER_IDS       Comma-separated seeded user IDs (default: 1-12).
   LOAD_TEST_ITEM_IDS       Comma-separated seeded inventory IDs (default: 1-12).
@@ -77,6 +81,48 @@ fi
 log() { printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+if (( ! DEPLOY_ONLY )); then
+  [[ "$BURST_RATE" =~ ^[1-9][0-9]*$ ]] || die "BURST_RATE must be a positive integer."
+  [[ "$PEAK_RATE" =~ ^[1-9][0-9]*$ ]] || die "PEAK_RATE must be a positive integer."
+  [[ "$HTTP_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "HTTP_TIMEOUT_SECONDS must be a positive integer."
+  if ! awk -v factor="$VU_SAFETY_FACTOR" 'BEGIN { exit !(factor >= 1) }'; then
+    die "VU_SAFETY_FACTOR must be a number greater than or equal to 1."
+  fi
+  HIGHEST_ARRIVAL_RATE="$(awk -v burst="$BURST_RATE" -v peak="$PEAK_RATE" 'BEGIN { print (burst > peak ? burst : peak) }')"
+  REQUIRED_PREALLOCATED_VUS="$(awk -v rate="$HIGHEST_ARRIVAL_RATE" -v timeout="$HTTP_TIMEOUT_SECONDS" -v factor="$VU_SAFETY_FACTOR" \
+    'BEGIN { needed = rate * timeout * factor; if (needed < 50) needed = 50; printf "%d", int(needed + 0.999999) }')"
+  if [[ -z "$PREALLOCATED_VUS" ]]; then
+    PREALLOCATED_VUS="$REQUIRED_PREALLOCATED_VUS"
+  fi
+  [[ "$PREALLOCATED_VUS" =~ ^[1-9][0-9]*$ ]] || die "PREALLOCATED_VUS must be a positive integer."
+  (( PREALLOCATED_VUS >= REQUIRED_PREALLOCATED_VUS )) || die \
+    "PREALLOCATED_VUS=$PREALLOCATED_VUS is too small for the maximum phase rate $HIGHEST_ARRIVAL_RATE RPS with a ${HTTP_TIMEOUT_SECONDS}s request timeout. Use at least $REQUIRED_PREALLOCATED_VUS."
+  if [[ -n "${MAX_VUS:-}" ]]; then
+    log "MAX_VUS is ignored; this profile uses one fixed, preallocated VU pool and does not add VUs during measurement."
+  fi
+fi
+
+postgres_psql() {
+  local attempt=1
+  local error_file="$RESULTS_DIR/postgres-query-stderr.log"
+  while (( attempt <= 60 )); do
+    if kubectl exec -n "$NAMESPACE" postgres-0 -- \
+      sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -U "$POSTGRES_USER" "$@"' sh \
+      "$@" 2>"$error_file"; then
+      return 0
+    fi
+    if ! grep -qi "too many clients" "$error_file"; then
+      cat "$error_file" >&2
+      return 1
+    fi
+    log "PostgreSQL is out of connection slots; retrying its read-only report query in 5 seconds (attempt $attempt/60)."
+    sleep 5
+    ((attempt += 1))
+  done
+  cat "$error_file" >&2
+  return 1
+}
+
 cleanup() {
   local pid
   for pid in "${PIDS[@]:-}"; do
@@ -100,6 +146,7 @@ require_command() {
 require_command kubectl
 require_command python3
 require_command curl
+require_command sha256sum
 if (( ! DEPLOY_ONLY )); then
   require_command docker
   require_command k6
@@ -211,8 +258,7 @@ if (( DEPLOY_STACK )); then
   kubectl apply -n "$NAMESPACE" -f "$ROOT_DIR/service-deployment/autoscaling.yml"
 
   if (( DEPLOY_ONLY )); then
-    log "Deploy-only finished. Check pods, PVCs, ScaledObjects, and HPAs with kubectl before running the experiment."
-    exit 0
+    log "Deployment applied; waiting below to verify readiness and database pool settings."
   fi
 else
   log "Skipping deployment as requested."
@@ -225,12 +271,52 @@ for deployment in coordinator-deployment order-deployment inventory-deployment p
   kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=5m
 done
 
+# Guard the shared PostgreSQL connection budget, including when --skip-deploy
+# is used. The four app pools can use at most 80 connections at replica caps
+# of 5/5/3/3, leaving headroom under PostgreSQL's default 100-connection limit.
+for deployment_container in \
+  coordinator-deployment:coordinator \
+  order-deployment:order \
+  inventory-deployment:inventory \
+  payment-deployment:payment; do
+  deployment="${deployment_container%%:*}"
+  container="${deployment_container##*:}"
+  pool_size="$(kubectl -n "$NAMESPACE" get deployment "$deployment" -o json | python3 -c \
+    'import json,sys; d=json.load(sys.stdin); c=next(x for x in d["spec"]["template"]["spec"]["containers"] if x["name"]==sys.argv[1]); print(next((e.get("value", "") for e in c.get("env", []) if e.get("name")=="SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE"), ""))' \
+    "$container")"
+  [[ "$pool_size" == "5" ]] || die \
+    "$deployment/$container has Hikari maximum pool size '$pool_size'; expected 5. Apply the current service-deployment manifests before measuring."
+done
+
+if (( DEPLOY_ONLY )); then
+  log "Deploy-only finished. Pods are ready and all application database pools are capped at five connections."
+  exit 0
+fi
+
 mkdir -p "$RESULTS_DIR"
 log "Saving experiment artifacts to $RESULTS_DIR"
+log "Load profile: one ramping-arrival-rate scenario, ${BURST_RATE} RPS burst, ${PEAK_RATE} RPS peak, ${PREALLOCATED_VUS} preallocated VUs, ${HTTP_TIMEOUT_SECONDS}s request timeout."
+log "The single VU pool is sized as highest phase rate × request timeout × ${VU_SAFETY_FACTOR}; k6 will not allocate VUs dynamically."
+{
+  printf 'run_id=%s\n' "$RUN_ID"
+  printf 'load_script_sha256=%s\n' "$(sha256sum "$ROOT_DIR/asset/scripts/load_testing.js" | awk '{print $1}')"
+  printf 'k6_version=%s\n' "$(k6 version 2>&1 | head -n1)"
+  printf 'burst_rate_rps=%s\npeak_rate_rps=%s\n' "$BURST_RATE" "$PEAK_RATE"
+  printf 'preallocated_vus=%s\nmax_vus=%s\nhttp_timeout_seconds=%s\nvu_safety_factor=%s\n' \
+    "$PREALLOCATED_VUS" "$PREALLOCATED_VUS" "$HTTP_TIMEOUT_SECONDS" "$VU_SAFETY_FACTOR"
+} >"$RESULTS_DIR/load-test-config.txt"
+getconf _NPROCESSORS_ONLN >"$RESULTS_DIR/load-generator-cpu-count.txt" 2>/dev/null || true
+if command -v free >/dev/null 2>&1; then
+  free -h >"$RESULTS_DIR/load-generator-memory.txt" 2>&1 || true
+fi
 kubectl version -o yaml >"$RESULTS_DIR/kubernetes-version.yaml"
 kubectl get nodes -o wide >"$RESULTS_DIR/nodes.txt"
 kubectl -n "$NAMESPACE" get pods -o wide >"$RESULTS_DIR/pods-before.txt"
 kubectl -n "$NAMESPACE" get scaledobjects,hpa,deployments -o yaml >"$RESULTS_DIR/scaling-configuration.yaml"
+
+postgres_psql -d postgres --csv -v ON_ERROR_STOP=1 \
+  -c "SELECT current_setting('max_connections')::int AS max_connections, count(*) FILTER (WHERE backend_type = 'client backend') AS client_connections FROM pg_stat_activity;" \
+  >"$RESULTS_DIR/postgres-connections-before.csv"
 
 if [[ -z "$METRICS_COLLECTOR_IMAGE" ]]; then
   METRICS_COLLECTOR_IMAGE="load-metrics-collector:${RUN_ID}"
@@ -297,8 +383,9 @@ k6 run \
   --summary-export="${RESULTS_DIR}/k6-summary.json" \
   -e "BURST_RATE=${BURST_RATE}" \
   -e "PEAK_RATE=${PEAK_RATE}" \
+  -e "HTTP_TIMEOUT_SECONDS=${HTTP_TIMEOUT_SECONDS}" \
+  -e "VU_SAFETY_FACTOR=${VU_SAFETY_FACTOR}" \
   -e "PREALLOCATED_VUS=${PREALLOCATED_VUS}" \
-  -e "MAX_VUS=${MAX_VUS}" \
   -e "LOAD_TEST_USER_IDS=${LOAD_TEST_USER_IDS}" \
   -e "LOAD_TEST_ITEM_IDS=${LOAD_TEST_ITEM_IDS}" \
   -e "LOAD_TEST_ITEM_PRICES=${LOAD_TEST_ITEM_PRICES}" \
@@ -312,8 +399,7 @@ log "Waiting for workflows from this run to reach a terminal state (up to ${WORK
 drain_started_at="$(date +%s)"
 pending_workflows=0
 while :; do
-  pending_workflows="$(kubectl exec -n "$NAMESPACE" postgres-0 -- \
-    sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -U "$POSTGRES_USER" "$@"' sh \
+  pending_workflows="$(postgres_psql \
     -d coordinator_db -tA -v ON_ERROR_STOP=1 \
     -v "run_start=$K6_START_AT" -v "run_end=$K6_END_AT" \
     -c "SELECT COUNT(*) FROM coordinator_workflows WHERE submitted_at >= :'run_start'::timestamptz AND submitted_at <= :'run_end'::timestamptz AND state NOT IN ('COMPLETED', 'ABORTED');" | tr -d '[:space:]')"
@@ -329,12 +415,15 @@ while :; do
 done
 
 log "Exporting Coordinator workflow timestamps from PostgreSQL."
-kubectl exec -n "$NAMESPACE" postgres-0 -- \
-  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -U "$POSTGRES_USER" "$@"' sh \
+postgres_psql \
   -d coordinator_db --csv -v ON_ERROR_STOP=1 \
   -v "run_start=$K6_START_AT" -v "run_end=$K6_END_AT" \
   -c "SELECT correlation_id, state, submitted_at, completed_at FROM coordinator_workflows WHERE submitted_at >= :'run_start'::timestamptz AND submitted_at <= :'run_end'::timestamptz ORDER BY submitted_at;" \
   >"$RESULTS_DIR/coordinator-workflows.csv"
+
+postgres_psql -d postgres --csv -v ON_ERROR_STOP=1 \
+  -c "SELECT current_setting('max_connections')::int AS max_connections, count(*) FILTER (WHERE backend_type = 'client backend') AS client_connections FROM pg_stat_activity;" \
+  >"$RESULTS_DIR/postgres-connections-after.csv"
 
 log "Capturing final cluster state."
 if ! kubectl -n "$NAMESPACE" get pods -o wide >"$RESULTS_DIR/pods-after.txt"; then
@@ -362,7 +451,12 @@ python3 "$ROOT_DIR/asset/scripts/analyze_load_test.py" \
   --output "$RESULTS_DIR/metrics-report.json" \
   --slo-p95-ms "$SLO_P95_MS" \
   --slo-window-seconds "$SLO_WINDOW_SECONDS" \
-  --slo-min-requests "$SLO_MIN_REQUESTS"
+  --slo-min-requests "$SLO_MIN_REQUESTS" \
+  --burst-rate "$BURST_RATE" \
+  --peak-rate "$PEAK_RATE" \
+  --preallocated-vus "$PREALLOCATED_VUS" \
+  --http-timeout-seconds "$HTTP_TIMEOUT_SECONDS" \
+  --vu-safety-factor "$VU_SAFETY_FACTOR"
 
 log "Coordinator workflow timestamp snapshot: $RESULTS_DIR/coordinator-workflows.csv"
 log "Experiment complete. Report: $RESULTS_DIR/metrics-report.json"
