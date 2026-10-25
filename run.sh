@@ -178,6 +178,21 @@ start_node_resource_sampler() {
   PIDS+=("$!")
 }
 
+start_pod_resource_sampler() {
+  local output_file="$RESULTS_DIR/pod-resource-samples.csv"
+  printf 'sampled_at_utc,pod,container,cpu,memory\n' >"$output_file"
+  (
+    while :; do
+      local sampled_at
+      sampled_at="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+      kubectl -n "$NAMESPACE" top pods --containers --no-headers 2>>"$RESULTS_DIR/pod-sampler-stderr.log" \
+        | awk -v sampled_at="$sampled_at" 'NF >= 4 { print sampled_at "," $1 "," $2 "," $3 "," $4 }' >>"$output_file" || true
+      sleep 10
+    done
+  ) >/dev/null 2>&1 &
+  PIDS+=("$!")
+}
+
 cleanup() {
   local pid
   for pid in "${PIDS[@]:-}"; do
@@ -418,6 +433,7 @@ if [[ ! -s "$RESULTS_DIR/kubernetes-events.jsonl" ]]; then
 fi
 start_postgres_connection_sampler
 start_node_resource_sampler
+start_pod_resource_sampler
 
 if [[ "$CONTEXT" == *minikube* ]]; then
   # Use NodePorts for the load generator. Port-forward opens one API-server
@@ -514,6 +530,8 @@ python3 "$ROOT_DIR/asset/scripts/analyze_load_test.py" \
   --workflows "$RESULTS_DIR/coordinator-workflows.csv" \
   --postgres-connections "$RESULTS_DIR/postgres-connection-samples.csv" \
   --node-resources "$RESULTS_DIR/node-resource-samples.csv" \
+  --pod-resources "$RESULTS_DIR/pod-resource-samples.csv" \
+  --pod-resource-errors "$RESULTS_DIR/pod-sampler-stderr.log" \
   --output "$RESULTS_DIR/metrics-report.json" \
   --slo-p95-ms "$SLO_P95_MS" \
   --slo-window-seconds "$SLO_WINDOW_SECONDS" \

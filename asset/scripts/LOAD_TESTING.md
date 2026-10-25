@@ -4,7 +4,7 @@
 
 The research objective is to compare the existing and alternative container image generation strategies under the same e-commerce workload and Kubernetes configuration. The immediate priority is to make the current load test reliably deliver its configured workload and correctly report per-phase request results, order completion times, completion coverage, and scaling behavior. Do not treat a run as a valid comparison if the load generator fails to deliver the scheduled arrivals or phase/workflow measurements are incomplete.
 
-After the load-test results are reliable, extend the experiment to collect metrics that are currently missing for a fuller image-strategy comparison: actual pod CPU and memory usage, image build duration, and image size. The current report records observed image IDs and startup/readiness timings, but it does not currently collect those three deferred measurements. Keep this work deferred until the current load-test reliability and intended metrics are resolved.
+The report collects per-container pod CPU and memory from metrics-server, CPU throttling from Prometheus scraping each kubelet's cAdvisor endpoint, and pod/container/application readiness timestamps. Image build duration and image size remain separate measurements for the fuller image-strategy comparison.
 
 ## One-command experiment
 
@@ -27,7 +27,7 @@ TARGET_RPS=15 WARMUP_RATE=3 WARMUP_SECONDS=120 \
 RAMP_UP_SECONDS=300 HOLD_SECONDS=300 RAMP_DOWN_SECONDS=120 ./run.sh
 ```
 
-Use a separate fresh database/Kafka state for each target-rate run. `run.sh` resets application replicas to one, but deliberately preserves PostgreSQL and Kafka persistent data. The observer records 10-second Prometheus samples for per-pod CPU, memory, CPU throttling, total Kafka consumer-group lag, per-partition Kafka lag, the number of lagging partitions, and the total partition count per application topic. The runner also captures node CPU/memory from `kubectl top` and a PostgreSQL connection-count time series. Pod readiness and HPA desired/current replica changes continue to be captured from Kubernetes watches. This single-target profile leaves the existing KEDA settings unchanged.
+Use a separate fresh database/Kafka state for each target-rate run. `run.sh` resets application replicas to one, but deliberately preserves PostgreSQL and Kafka persistent data. The observer records 10-second Prometheus samples for total Kafka consumer-group lag, per-partition Kafka lag, the number of lagging partitions, and the total partition count per application topic. The runner samples per-container pod CPU/memory and node CPU/memory through `kubectl top`, records PostgreSQL connections, and collects CPU throttling from Prometheus scraping kubelet cAdvisor metrics. Pod creation, container start, Spring application-ready timestamps, Kubernetes readiness, and HPA desired/current replica changes are captured separately. This single-target profile leaves the existing KEDA settings unchanged.
 
 The run fails k6's `dropped_iterations` threshold if it cannot start every scheduled iteration. A p95 threshold failure with zero dropped iterations means k6 delivered the configured arrivals and the service missed the 500ms latency SLO. A dropped-iteration failure means the requested load was not delivered, so compare the run's `load_generator` and per-phase arrival delivery fields before drawing service conclusions. `load-test-config.txt` records the script SHA-256 and exact VU/rate settings so a VM run can be checked against the script version.
 
@@ -53,7 +53,7 @@ PostgreSQL's connection limit is shared by all four application databases. Each 
 
 Rebuild and deploy the updated Java services and apply the Deployment manifests. The manifests use a startup probe, a liveness probe, and a readiness probe. Readiness includes Spring readiness state; the database-backed services also require a healthy database. Liveness only checks the application process, so a dependency outage does not cause restart loops. Kafka connectivity is not added to readiness in this implementation; Kafka failures show up in end-to-end completion and lag data instead.
 
-The collector uses Pod creation and Ready-condition timestamps from Kubernetes. Each service also publishes `application.ready.timestamp` at Spring's `ApplicationReadyEvent`, allowing a separate interval from container start to Spring application ready.
+The collector uses Pod creation, container start, and Ready-condition timestamps from Kubernetes. Each service also publishes `application.ready.timestamp` at Spring's `ApplicationReadyEvent`; the observer reads it from the management port (8085) to separate container-to-Spring startup from Spring-ready-to-Pod-ready time.
 
 ## 2. Start the Kubernetes observer before the load
 
@@ -84,7 +84,7 @@ mkdir -p results
 kubectl -n ecomm logs -f deployment/load-metrics-collector > results/kubernetes-events.jsonl
 ```
 
-The collector has read-only access to lifecycle/scaling resources in namespace `ecomm`. Its only application request is a GET to each pod's Actuator ready-timestamp metric.
+The observer has read-only access to lifecycle/scaling resources in namespace `ecomm`. Prometheus also receives node discovery and kubelet metrics read access to scrape `/metrics/cadvisor` over HTTPS using its ServiceAccount token. The runner uses the current kubeconfig identity for `kubectl top` samples. The observer's application request is a GET to each pod's Actuator ready-timestamp metric on port 8085.
 
 ## 3. Run k6
 

@@ -149,6 +149,86 @@ def summarize_node_resources(path):
     }
 
 
+def parse_cpu_millicores(value):
+    value = value.strip()
+    if value.endswith("m"):
+        return float(value[:-1])
+    if value.endswith("u"):
+        return float(value[:-1]) / 1000
+    if value.endswith("n"):
+        return float(value[:-1]) / 1_000_000
+    return float(value) * 1000
+
+
+def parse_memory_bytes(value):
+    value = value.strip()
+    units = {
+        "Ki": 1024,
+        "Mi": 1024 ** 2,
+        "Gi": 1024 ** 3,
+        "Ti": 1024 ** 4,
+        "K": 1000,
+        "M": 1000 ** 2,
+        "G": 1000 ** 3,
+        "T": 1000 ** 4,
+    }
+    for suffix, multiplier in units.items():
+        if value.endswith(suffix):
+            return float(value[:-len(suffix)]) * multiplier
+    return float(value)
+
+
+def summarize_pod_resources(path, errors_path=None):
+    if not path or not Path(path).exists():
+        return {"status": "missing_input", "samples": 0, "container_series": 0, "by_pod_container": []}
+    grouped = defaultdict(list)
+    with open(path, newline="", encoding="utf-8") as stream:
+        for row in csv.DictReader(stream):
+            try:
+                key = (row["pod"], row["container"])
+                grouped[key].append({
+                    "sampled_at_utc": row["sampled_at_utc"],
+                    "cpu_millicores": parse_cpu_millicores(row["cpu"]),
+                    "memory_bytes": parse_memory_bytes(row["memory"]),
+                })
+            except (KeyError, ValueError):
+                continue
+
+    series = []
+    for (pod, container), observations in sorted(grouped.items()):
+        cpu = [item["cpu_millicores"] for item in observations]
+        memory = [item["memory_bytes"] for item in observations]
+        series.append({
+            "pod": pod,
+            "container": container,
+            "samples": len(observations),
+            "cpu_millicores": {
+                "mean": sum(cpu) / len(cpu),
+                "p95": percentile(cpu, 95),
+                "max": max(cpu),
+            },
+            "memory_bytes": {
+                "mean": sum(memory) / len(memory),
+                "p95": percentile(memory, 95),
+                "max": max(memory),
+            },
+            "first_sample_at": observations[0]["sampled_at_utc"],
+            "last_sample_at": observations[-1]["sampled_at_utc"],
+        })
+    errors = []
+    if errors_path and Path(errors_path).exists():
+        errors = [line.strip() for line in Path(errors_path).read_text(encoding="utf-8").splitlines() if line.strip()]
+    return {
+        "status": "available" if series else "no_samples",
+        "samples": sum(item["samples"] for item in series),
+        "container_series": len(series),
+        "sampling_source": "kubectl top pods --containers via metrics-server",
+        "sampler_error_lines": len(errors),
+        "last_sampler_error": errors[-1] if errors else None,
+        "by_pod_container": series,
+    }
+
+
 def read_workflows(path, phase_starts, phase_durations=None):
     """Group durable Coordinator rows by their k6 submission phase."""
     result = defaultdict(list)
@@ -664,6 +744,8 @@ def main():
     parser.add_argument("--workflows", help="CSV snapshot of Coordinator workflow timestamps from PostgreSQL")
     parser.add_argument("--postgres-connections", help="CSV time series of PostgreSQL connection samples")
     parser.add_argument("--node-resources", help="CSV time series from kubectl top nodes")
+    parser.add_argument("--pod-resources", help="CSV time series from kubectl top pods --containers")
+    parser.add_argument("--pod-resource-errors", help="stderr log from the pod resource sampler")
     parser.add_argument("--output", default="load-test-summary.json")
     parser.add_argument("--slo-p95-ms", type=float, default=500)
     parser.add_argument("--slo-window-seconds", type=int, default=30)
@@ -786,6 +868,7 @@ def main():
         "runtime_metric_sample_errors": runtime_metric_errors,
         "postgres_connections": summarize_postgres_connections(args.postgres_connections),
         "node_resources": summarize_node_resources(args.node_resources),
+        "pod_resources": summarize_pod_resources(args.pod_resources, args.pod_resource_errors),
         "collector_non_json_log_lines_ignored": collector_log_lines_ignored,
         "source_counts": {
             "pods": len(pods),

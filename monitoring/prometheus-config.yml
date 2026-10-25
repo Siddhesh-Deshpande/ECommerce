@@ -56,6 +56,17 @@ data:
         static_configs:
           - targets: ['kube-state-metrics.kube-system.svc.cluster.local:8080']
 
-      - job_name: 'cadvisor'
-        static_configs:
-          - targets: ['cadvisor-service.kube-system.svc.cluster.local:8080']
+      - job_name: 'kubelet-cadvisor'
+        scheme: https
+        metrics_path: /metrics/cadvisor
+        scrape_interval: 5s
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          # Minikube's kubelet certificate may not contain the node IP as a SAN.
+          insecure_skip_verify: true
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_node_name]
+            target_label: node

@@ -16,12 +16,7 @@ from kubernetes import client, config, watch
 from kubernetes.client.rest import ApiException
 
 
-APP_PORTS = {
-    "coordinator": 8081,
-    "order": 8083,
-    "inventory": 8082,
-    "payment": 8084,
-}
+MANAGEMENT_PORT = 8085
 
 PROMETHEUS_QUERIES = {
     "container_cpu_cores": (
@@ -123,7 +118,7 @@ class Recorder:
 
     def capture_app_ready_metric(self, record):
         app = record["labels"].get("app")
-        port = APP_PORTS.get(app)
+        port = MANAGEMENT_PORT if app in {"coordinator", "order", "inventory", "payment"} else None
         pod_uid = record.get("uid")
         if not port or not record.get("pod_ip") or not pod_uid or pod_uid in self.app_ready_recorded:
             return
