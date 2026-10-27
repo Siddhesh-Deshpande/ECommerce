@@ -8,8 +8,8 @@
 
         <!-- JSON File Appender ONLY for database operations -->
         <RollingFile name="DatabaseOpsJsonFile"
-                     fileName="order-service/logs/database-operations.json"
-                     filePattern="order-service/logs/database-operations-%d{yyyy-MM-dd}-%i.json.gz">
+                     fileName="/tmp/order-service-database-operations.json"
+                     filePattern="/tmp/order-service-database-operations-%d{yyyy-MM-dd}-%i.json.gz">
             <JsonTemplateLayout eventTemplateUri="classpath:EcsLayout.json"/>
             <Policies>
                 <TimeBasedTriggeringPolicy/>

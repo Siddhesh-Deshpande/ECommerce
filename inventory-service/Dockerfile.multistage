@@ -2,7 +2,7 @@
 FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /workspace
 COPY . .
-RUN mvn -B -DskipTests -pl inventory-service -am package
+RUN mvn -B -DskipTests -pl inventory-service -am clean package
 
 # Keep Maven and the JDK out of the runtime image.
 FROM gcr.io/distroless/java21-debian12:nonroot

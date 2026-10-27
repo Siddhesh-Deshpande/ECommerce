@@ -1,7 +1,10 @@
 .git
 .idea
 .vscode
-**/target
 results
+**/target
+**/build
+**/logs
 *.log
 *.iml
+.DS_Store

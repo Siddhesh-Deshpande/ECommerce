@@ -5,7 +5,7 @@ ENV MAVEN_HOME=/usr/share/maven
 ENV PATH="${MAVEN_HOME}/bin:${PATH}"
 WORKDIR /workspace
 COPY . .
-RUN mvn -B -Pnative,graalvm-build -DskipTests -pl inventory-service -am package
+RUN mvn -B -Pnative,graalvm-build -DskipTests -pl inventory-service -am clean package
 
 # GraalVM native-image-community uses glibc; use a small compatible runtime.
 FROM debian:bookworm-slim

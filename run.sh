@@ -92,6 +92,12 @@ fi
 
 log() { printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
+normalize_image_prefix() {
+  case "$1" in
+    docker.io/*) printf '%s' "${1#docker.io/}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
 
 if (( ! DEPLOY_ONLY )); then
   if [[ -n "$TARGET_RPS" ]]; then
@@ -367,6 +373,29 @@ mkdir -p "$RESULTS_DIR"
 log "Saving experiment artifacts to $RESULTS_DIR"
 log "Load profile: ${LOAD_PROFILE}; ${PREALLOCATED_VUS} preallocated VUs, ${HTTP_TIMEOUT_SECONDS}s request timeout."
 log "The single VU pool is sized as highest phase rate × request timeout × ${VU_SAFETY_FACTOR}; k6 will not allocate VUs dynamically."
+IMAGE_BUILD_METADATA="$ROOT_DIR/results/.last-image-build.txt"
+IMAGE_BUILD_STRATEGY="unknown"
+IMAGE_BUILD_MATCH="missing"
+IMAGE_BUILD_PUSHED="unknown"
+if [[ -f "$IMAGE_BUILD_METADATA" ]]; then
+  cp "$IMAGE_BUILD_METADATA" "$RESULTS_DIR/image-build-metadata.txt"
+  IMAGE_BUILD_STRATEGY="$(awk -F= '$1 == "strategy" {sub(/^[^=]*=/, ""); print; exit}' "$IMAGE_BUILD_METADATA")"
+  BUILD_IMAGE_REGISTRY="$(awk -F= '$1 == "image_registry" {sub(/^[^=]*=/, ""); print; exit}' "$IMAGE_BUILD_METADATA")"
+  BUILD_IMAGE_TAG="$(awk -F= '$1 == "image_tag" {sub(/^[^=]*=/, ""); print; exit}' "$IMAGE_BUILD_METADATA")"
+  IMAGE_BUILD_PUSHED="$(awk -F= '$1 == "pushed" {sub(/^[^=]*=/, ""); print; exit}' "$IMAGE_BUILD_METADATA")"
+  if [[ "$(normalize_image_prefix "$BUILD_IMAGE_REGISTRY")" == "$(normalize_image_prefix "$IMAGE_REPOSITORY_PREFIX")" \
+      && "$BUILD_IMAGE_TAG" == "$IMAGE_TAG" ]]; then
+    IMAGE_BUILD_MATCH="yes"
+  else
+    IMAGE_BUILD_MATCH="no"
+    log "WARNING: Last image build metadata does not match deployed prefix/tag (${IMAGE_REPOSITORY_PREFIX}:$IMAGE_TAG)."
+  fi
+  if [[ "$IMAGE_BUILD_MATCH" == "yes" && "$IMAGE_BUILD_PUSHED" != "1" ]]; then
+    log "WARNING: The matching image build was not pushed. The deployments use imagePullPolicy=Always, so the cluster may run a different registry image."
+  fi
+else
+  log "WARNING: No image build metadata found; this run will record the actual pod image IDs for later identification."
+fi
 {
   printf 'run_id=%s\n' "$RUN_ID"
   printf 'load_script_sha256=%s\n' "$(sha256sum "$ROOT_DIR/asset/scripts/load_testing.js" | awk '{print $1}')"
@@ -377,6 +406,8 @@ log "The single VU pool is sized as highest phase rate × request timeout × ${V
     "$WARMUP_RATE" "$WARMUP_SECONDS" "$RAMP_UP_SECONDS" "$HOLD_SECONDS" "$RAMP_DOWN_SECONDS"
   printf 'preallocated_vus=%s\nmax_vus=%s\nhttp_timeout_seconds=%s\nvu_safety_factor=%s\n' \
     "$PREALLOCATED_VUS" "$PREALLOCATED_VUS" "$HTTP_TIMEOUT_SECONDS" "$VU_SAFETY_FACTOR"
+  printf 'image_repository_prefix=%s\nimage_tag=%s\nimage_build_strategy=%s\nimage_build_metadata_match=%s\nimage_build_pushed=%s\n' \
+    "$IMAGE_REPOSITORY_PREFIX" "$IMAGE_TAG" "$IMAGE_BUILD_STRATEGY" "$IMAGE_BUILD_MATCH" "$IMAGE_BUILD_PUSHED"
 } >"$RESULTS_DIR/load-test-config.txt"
 getconf _NPROCESSORS_ONLN >"$RESULTS_DIR/load-generator-cpu-count.txt" 2>/dev/null || true
 if command -v free >/dev/null 2>&1; then
@@ -385,6 +416,17 @@ fi
 kubectl version -o yaml >"$RESULTS_DIR/kubernetes-version.yaml"
 kubectl get nodes -o wide >"$RESULTS_DIR/nodes.txt"
 kubectl -n "$NAMESPACE" get pods -o wide >"$RESULTS_DIR/pods-before.txt"
+kubectl -n "$NAMESPACE" get pods -o json >"$RESULTS_DIR/pods-before.json"
+if [[ "$IMAGE_BUILD_MATCH" == "yes" && "$IMAGE_BUILD_PUSHED" == "1" ]]; then
+  if ! python3 "$ROOT_DIR/asset/scripts/verify_runtime_images.py" \
+      "$RESULTS_DIR/image-build-metadata.txt" "$RESULTS_DIR/pods-before.json" \
+      >"$RESULTS_DIR/image-runtime-check.json"; then
+    die "Ready pods are not running the digests from the last image build. See $RESULTS_DIR/image-runtime-check.json; no load was sent."
+  fi
+else
+  printf '{"status":"not_checked","reason":"matching pushed image metadata is unavailable"}\n' \
+    >"$RESULTS_DIR/image-runtime-check.json"
+fi
 kubectl -n "$NAMESPACE" get scaledobjects,hpa,deployments -o yaml >"$RESULTS_DIR/scaling-configuration.yaml"
 
 postgres_psql -d postgres --csv -v ON_ERROR_STOP=1 \
@@ -508,6 +550,9 @@ postgres_psql -d postgres --csv -v ON_ERROR_STOP=1 \
 log "Capturing final cluster state."
 if ! kubectl -n "$NAMESPACE" get pods -o wide >"$RESULTS_DIR/pods-after.txt"; then
   log "WARNING: Kubernetes API was unavailable for the final pod snapshot."
+fi
+if ! kubectl -n "$NAMESPACE" get pods -o json >"$RESULTS_DIR/pods-after.json"; then
+  log "WARNING: Kubernetes API was unavailable for the final pod image snapshot."
 fi
 if ! kubectl -n "$NAMESPACE" get scaledobjects,hpa,deployments -o yaml >"$RESULTS_DIR/scaling-configuration-after.yaml"; then
   log "WARNING: Kubernetes API was unavailable for the final scaling snapshot."

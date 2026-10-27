@@ -5,7 +5,7 @@ import argparse
 import csv
 import json
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -285,6 +285,7 @@ def read_k6(path):
     phase_starts = {}
     phase_durations = {}
     phase_latencies = defaultdict(list)
+    phase_http_statuses = defaultdict(Counter)
     phase_failures = defaultdict(list)
     phase_e2e_latencies = defaultdict(list)
     phase_lookup_latencies = defaultdict(list)
@@ -318,6 +319,7 @@ def read_k6(path):
             all_http_samples.append((sample_time, latency))
             if phase:
                 phase_latencies[phase].append(latency)
+                phase_http_statuses[phase][str(tags.get("status", "unknown"))] += 1
                 # Also use POST samples as phase boundaries. This lets the
                 # analyzer recover runs whose k6 output omitted custom counters.
                 phase_starts[phase] = min(phase_starts.get(phase, sample_time), sample_time)
@@ -346,13 +348,14 @@ def read_k6(path):
     return (phase_starts, phase_latencies, phase_failures, all_http_samples,
             phase_e2e_latencies, phase_lookup_latencies, phase_submission_errors,
             phase_completion_errors, phase_submitted, phase_completed, phase_markers,
-            dropped_by_scenario, max_active_vus, max_initialized_vus, phase_durations)
+            dropped_by_scenario, max_active_vus, max_initialized_vus, phase_durations,
+            phase_http_statuses)
 
 
 def summarize_requests(phase_starts, phase_latencies, phase_failures, phase_e2e_latencies,
                        phase_lookup_latencies, phase_submission_errors, phase_completion_errors,
                        phase_submitted, phase_completed, phase_markers, phase_rates, phase_workflows,
-                       phase_durations=None):
+                       phase_durations=None, phase_http_statuses=None):
     result = {}
     phases = set(phase_starts) | set(phase_latencies) | set(phase_workflows)
     for phase in sorted(phases, key=lambda name: phase_starts.get(name, datetime.max.replace(tzinfo=timezone.utc))):
@@ -393,6 +396,7 @@ def summarize_requests(phase_starts, phase_latencies, phase_failures, phase_e2e_
                 "p99": percentile(values, 99),
             },
             "http_failure_rate": sum(failures) / len(failures) if failures else None,
+            "http_response_status_counts": dict((phase_http_statuses or {}).get(phase, {})),
             "orders_submitted": len(workflows),
             "k6_successful_submission_responses": phase_submitted.get(phase, 0),
             "orders_completed": workflow_completed,
@@ -765,7 +769,7 @@ def main():
     (phase_starts, phase_latencies, phase_failures, request_samples, phase_e2e_latencies,
      phase_lookup_latencies, phase_submission_errors, phase_completion_errors,
      phase_submitted, phase_completed, phase_markers, dropped_by_scenario,
-     max_active_vus, max_initialized_vus, phase_durations) = read_k6(args.k6)
+     max_active_vus, max_initialized_vus, phase_durations, phase_http_statuses) = read_k6(args.k6)
     if not phase_starts:
         raise SystemExit("No measured-phase POST samples found in k6 JSON output; check the test script and endpoint tags.")
     (pods, hpas, deployments, app_ready_metrics, scaledobjects, collector_gaps,
@@ -821,7 +825,7 @@ def main():
             phase_starts, phase_latencies, phase_failures, phase_e2e_latencies,
             phase_lookup_latencies, phase_submission_errors, phase_completion_errors,
             phase_submitted, phase_completed, phase_markers, phase_rates, phase_workflows,
-            phase_durations,
+            phase_durations, phase_http_statuses,
         ),
         "load_generator": {
             "executor": "one ramping-arrival-rate scenario with a fixed preallocated VU pool",

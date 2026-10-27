@@ -5,7 +5,8 @@ available for coordinator, order, inventory, and payment:
 
 - `Dockerfile.multistage` builds the executable JAR in a Maven/JDK stage and
   copies it into the existing Distroless Java runtime.
-- Jib builds layered JVM images directly from each service's Maven project.
+- Jib builds layered JVM images directly from each service's Maven project,
+  using the same Distroless Java 21 nonroot runtime as the multistage strategy.
 - `Dockerfile.graalvm` uses Spring AOT and GraalVM Native Image to build a
   native executable, then packages it in a small Debian runtime. The service
   POMs declare Native Build Tools. The Spring Boot parent `native` profile
@@ -13,9 +14,19 @@ available for coordinator, order, inventory, and payment:
   native compiler to Maven's `package` phase. The Order, Inventory, and Payment
   services pin Log4j 2.25.5 (which includes GraalVM reachability metadata), set
   their Log4j2 configuration explicitly, and include GraalVM resource metadata
-  for the application configuration and Spring Boot's Log4j2 defaults.
+  for the application configuration and Spring Boot's Log4j2 defaults. The
+  application classes also register their Kafka event DTOs for Jackson binding
+  so native images can serialize and deserialize outbox payloads. The shared
+  outbox configuration round-trips every event DTO during application startup;
+  a JSON compatibility failure therefore prevents a rollout from becoming
+  ready instead of returning 500 for every order.
 
-Build locally (Docker must be running):
+The build script cleans Maven outputs before building. Container builds exclude
+`target`, `results`, logs, and IDE files from their context, and image builds use
+temporary tags until all four service images build successfully. The deployment
+tags remain `latest` for all strategies.
+
+Build locally (Docker must be running; Jib also requires Maven to run on JDK 21+):
 
 ```bash
 scripts/build-images.sh multistage
@@ -42,7 +53,7 @@ regular experiment against the currently tagged images:
 ```
 
 The `run.sh` deployment path uses `latest` by default. For a different
-repository, set the same prefix for building and deployment:
+repository prefix, set the same prefix for building and deployment:
 
 ```bash
 IMAGE_REGISTRY=registry.example.com/team IMAGE_TAG=latest \
@@ -50,6 +61,12 @@ IMAGE_REGISTRY=registry.example.com/team IMAGE_TAG=latest \
 IMAGE_REPOSITORY_PREFIX=registry.example.com/team IMAGE_TAG=latest \
   ./run.sh
 ```
+
+Each run copies the last image-build metadata into its results directory and
+captures Kubernetes pod JSON before and after the load. The pod snapshots
+include the image IDs actually used by the cluster. The load report also counts
+HTTP response status codes by phase, which helps distinguish application 4xx/5xx
+responses from transport failures.
 
 GraalVM native compilation takes substantially more time and memory than the
 JVM image builds. It also changes the runtime model, so record it as a separate
