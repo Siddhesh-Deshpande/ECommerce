@@ -28,6 +28,8 @@
 	</scm>
 	<properties>
 		<java.version>21</java.version>
+		<!-- Log4j 2.25+ ships GraalVM reachability metadata for native images. -->
+		<log4j2.version>2.25.5</log4j2.version>
 	</properties>
 	<dependencies>
         <dependency>

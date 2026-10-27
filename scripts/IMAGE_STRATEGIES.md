@@ -10,7 +10,10 @@ available for coordinator, order, inventory, and payment:
   native executable, then packages it in a small Debian runtime. The service
   POMs declare Native Build Tools. The Spring Boot parent `native` profile
   enables AOT processing; the service POM's `graalvm-build` profile binds the
-  native compiler to Maven's `package` phase.
+  native compiler to Maven's `package` phase. The Order, Inventory, and Payment
+  services pin Log4j 2.25.5 (which includes GraalVM reachability metadata), set
+  their Log4j2 configuration explicitly, and include GraalVM resource metadata
+  for the application configuration and Spring Boot's Log4j2 defaults.
 
 Build locally (Docker must be running):
 
