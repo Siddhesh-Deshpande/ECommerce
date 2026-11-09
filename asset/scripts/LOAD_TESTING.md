@@ -8,7 +8,7 @@ The report collects per-container pod CPU and memory from metrics-server, CPU th
 
 ## One-command experiment
 
-From the repository root, run `./run.sh`. It applies PostgreSQL, single-node Apache Kafka in combined KRaft mode, monitoring, and application manifests in dependency order; preserves the existing `ecomm` namespace and PostgreSQL data; idempotently ensures `coordinator_db` exists; restarts the app deployments so they pull the images tagged `latest`; resets the test baseline to one replica and applies KEDA ScaledObjects; starts the Kubernetes observer; runs k6; and writes raw data plus a report under `results/<UTC timestamp>/`.
+From the repository root, run `./run.sh`. It applies PostgreSQL, single-node Apache Kafka in combined KRaft mode, and monitoring; starts the Kubernetes observer before creating/restarting application Pods; applies application manifests and KEDA ScaledObjects; runs k6; and writes raw data plus a report under `results/<UTC timestamp>/`. It preserves the existing `ecomm` namespace and PostgreSQL data and idempotently ensures `coordinator_db` exists.
 
 The Kafka service name and port stay `kafka-service:9092`, so application, Kafka exporter, and KEDA bootstrap settings remain compatible. When migrating an existing ZooKeeper-based cluster, the script replaces the Kafka StatefulSet, removes ZooKeeper workloads/services, retains the old Kafka and ZooKeeper PVCs, and creates a fresh KRaft data PVC. Existing Kafka topic data is not migrated. This single combined broker/controller is intended for this local experiment, not high availability.
 
@@ -53,11 +53,11 @@ PostgreSQL's connection limit is shared by all four application databases. Each 
 
 Rebuild and deploy the updated Java services and apply the Deployment manifests. The manifests use a startup probe, a liveness probe, and a readiness probe. Readiness includes Spring readiness state; the database-backed services also require a healthy database. Liveness only checks the application process, so a dependency outage does not cause restart loops. Kafka connectivity is not added to readiness in this implementation; Kafka failures show up in end-to-end completion and lag data instead.
 
-The collector uses Pod creation, container start, and Ready-condition timestamps from Kubernetes. Each service also publishes `application.ready.timestamp` at Spring's `ApplicationReadyEvent`; the observer reads it from the management port (8085) to separate container-to-Spring startup from Spring-ready-to-Pod-ready time.
+The collector uses Pod creation, container start, and Ready-condition timestamps from Kubernetes. It also watches Pod lifecycle Events (`Pulling`, `Pulled`, and `Created`) and retains their source timestamps. Each service publishes `application.main.timestamp` immediately on entry to `main()` and `application.ready.timestamp` at Spring's `ApplicationReadyEvent`; the observer reads both from the management port (8085). This separates container-to-runtime startup, Spring/application initialization, and probe-to-Pod-ready time.
 
 ## 2. Start the Kubernetes observer before the load
 
-The observer watches Pods, Deployments, KEDA ScaledObjects, and the HPAs managed by KEDA. It also reads the per-pod Spring ready timestamp. Run it inside the cluster so the pod IPs are reachable:
+The observer watches Pods, Pod lifecycle Events, Deployments, KEDA ScaledObjects, and the HPAs managed by KEDA. `run.sh` starts it before creating application Pods, so it can capture initial image pulls as well as later scale-up Pods. It also reads per-pod startup timestamps. Run it inside the cluster so the pod IPs are reachable:
 
 ```bash
 docker build -f asset/scripts/metrics-collector.Dockerfile -t load-metrics-collector:latest .
@@ -136,8 +136,11 @@ The report includes per-phase target and observed request rates, started iterati
 The startup report separates:
 
 - Pod creation to Kubernetes Ready condition.
-- Container start to Spring `ApplicationReadyEvent`.
+- Container start to application `main()` entry (JVM/native runtime startup).
+- Application `main()` entry to Spring `ApplicationReadyEvent` (Spring/application initialization).
 - Spring ready event to Pod Ready condition (probe/dependency and scheduling interval).
+
+Each `run.sh` result directory also contains `pod-startup-phases.csv`, one raw timestamp row per Pod created during measurement. Where Kubernetes Events are emitted, it additionally records image-pull start/end and container-created timestamps. Event timestamps are operational Kubernetes records and can be delayed, aggregated, or unavailable on a particular cluster; retain the source `kubernetes-events.jsonl` and treat a missing phase value as missing rather than zero.
 
 The scale report defines `T0` as the first load marker emitted immediately before a phase's first POST. `T1` is the first observed HPA external metric value above its configured target when that metric was below target at phase start. `T2` is the collector-observed desired-replica increase, `T3` is the new pod's API creation timestamp, and `T4` is its Ready-condition transition timestamp. This gives `T1−T0` for metric reaction, `T2−T0` for replica decision, `T2−T1` for decision delay, `T4−T2` for pod provisioning, and `T4−T0` for total response. T1 is left unset when the HPA metric sample is unavailable or already above target at phase start. The collector watch receipt time is used for T1/T2, so their resolution is affected by API watch delivery and cluster clock synchronization. Use synchronized clocks on the k6 runner, cluster nodes, and API control plane.
 

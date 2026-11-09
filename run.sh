@@ -253,6 +253,10 @@ if (( ! ASSUME_YES )); then
   [[ "$answer" == "y" || "$answer" == "Y" || "$answer" == "yes" || "$answer" == "YES" ]] || die "Cancelled. No resources were changed."
 fi
 
+if (( ! DEPLOY_ONLY )); then
+  mkdir -p "$RESULTS_DIR"
+fi
+
 if (( DEPLOY_STACK )); then
   log "Creating namespace if needed (existing namespace and persistent data are preserved)."
   kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
@@ -299,6 +303,46 @@ if (( DEPLOY_STACK )); then
   kubectl -n "$NAMESPACE" rollout restart deployment/prometheus
   kubectl -n "$NAMESPACE" rollout status deployment/prometheus --timeout=5m
   kubectl -n "$NAMESPACE" rollout status deployment/kafka-exporter --timeout=5m
+
+  if (( ! DEPLOY_ONLY )); then
+    # Start lifecycle collection before creating application pods so the first
+    # image pulls and container events are observed, not only later scale-ups.
+    if [[ -z "$METRICS_COLLECTOR_IMAGE" ]]; then
+      METRICS_COLLECTOR_IMAGE="load-metrics-collector:${RUN_ID}"
+    fi
+    log "Building metrics observer image: $METRICS_COLLECTOR_IMAGE"
+    docker build -f "$ROOT_DIR/asset/scripts/metrics-collector.Dockerfile" -t "$METRICS_COLLECTOR_IMAGE" "$ROOT_DIR"
+    if [[ "$CONTEXT" == *minikube* ]]; then
+      minikube image load "$METRICS_COLLECTOR_IMAGE"
+    elif [[ "$CONTEXT" == kind-* ]]; then
+      kind load docker-image "$METRICS_COLLECTOR_IMAGE"
+    else
+      docker push "$METRICS_COLLECTOR_IMAGE"
+    fi
+
+    kubectl apply -f "$ROOT_DIR/asset/scripts/metrics-collector-rbac.yaml"
+    kubectl apply -f "$ROOT_DIR/asset/scripts/metrics-collector-deployment.yaml"
+    kubectl -n "$NAMESPACE" set image deployment/load-metrics-collector collector="$METRICS_COLLECTOR_IMAGE"
+    kubectl -n "$NAMESPACE" rollout status deployment/load-metrics-collector --timeout=3m
+    COLLECTOR_STARTED=1
+
+    COLLECTOR_POD=""
+    for attempt in $(seq 1 60); do
+      COLLECTOR_POD="$(kubectl -n "$NAMESPACE" get pods -l app=load-metrics-collector --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+      [[ -n "$COLLECTOR_POD" ]] && break
+      sleep 1
+    done
+    [[ -n "$COLLECTOR_POD" ]] || die "Metrics observer has no Running pod. Check kubectl -n $NAMESPACE get pods and describe the observer pod."
+    kubectl -n "$NAMESPACE" wait --for=condition=Ready "pod/$COLLECTOR_POD" --timeout=2m
+    kubectl -n "$NAMESPACE" logs -f "$COLLECTOR_POD" >"$RESULTS_DIR/kubernetes-events.jsonl" 2>"$RESULTS_DIR/collector-stderr.log" &
+    PIDS+=("$!")
+
+    for attempt in $(seq 1 30); do
+      [[ -s "$RESULTS_DIR/kubernetes-events.jsonl" ]] && break
+      sleep 1
+    done
+    [[ -s "$RESULTS_DIR/kubernetes-events.jsonl" ]] || die "Metrics observer has not emitted records; see $RESULTS_DIR/collector-stderr.log"
+  fi
 
   log "Applying the four application Deployments and Services."
   # Remove the previous KEDA HPAs during the rollout so they do not compete
@@ -433,6 +477,7 @@ postgres_psql -d postgres --csv -v ON_ERROR_STOP=1 \
   -c "SELECT current_setting('max_connections')::int AS max_connections, count(*) FILTER (WHERE backend_type = 'client backend') AS client_connections FROM pg_stat_activity;" \
   >"$RESULTS_DIR/postgres-connections-before.csv"
 
+if (( ! COLLECTOR_STARTED )); then
 if [[ -z "$METRICS_COLLECTOR_IMAGE" ]]; then
   METRICS_COLLECTOR_IMAGE="load-metrics-collector:${RUN_ID}"
 fi
@@ -472,6 +517,7 @@ done
 if [[ ! -s "$RESULTS_DIR/kubernetes-events.jsonl" ]]; then
   echo "Metrics observer has not emitted any JSONL records; see $RESULTS_DIR/collector-stderr.log" >&2
   die "Stopping before k6 so the run cannot produce a report with missing Kubernetes metrics."
+fi
 fi
 start_postgres_connection_sampler
 start_node_resource_sampler
@@ -577,6 +623,7 @@ python3 "$ROOT_DIR/asset/scripts/analyze_load_test.py" \
   --node-resources "$RESULTS_DIR/node-resource-samples.csv" \
   --pod-resources "$RESULTS_DIR/pod-resource-samples.csv" \
   --pod-resource-errors "$RESULTS_DIR/pod-sampler-stderr.log" \
+  --pod-phase-ledger "$RESULTS_DIR/pod-startup-phases.csv" \
   --output "$RESULTS_DIR/metrics-report.json" \
   --slo-p95-ms "$SLO_P95_MS" \
   --slo-window-seconds "$SLO_WINDOW_SECONDS" \

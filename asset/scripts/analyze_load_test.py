@@ -506,6 +506,7 @@ def read_kubernetes(path):
     pods = defaultdict(list)
     hpas = defaultdict(list)
     deployments = defaultdict(list)
+    events = defaultdict(list)
     app_ready_metrics = {}
     scaledobjects = {}
     collector_gaps = []
@@ -515,6 +516,8 @@ def read_kubernetes(path):
         kind = record.get("resource")
         if kind == "pod":
             pods[record.get("uid")].append(record)
+        elif kind == "event" and record.get("involved_object_kind") == "Pod":
+            events[record.get("involved_object_uid")].append(record)
         elif kind == "hpa":
             hpas[record.get("target_name")].append(record)
         elif kind == "deployment":
@@ -529,17 +532,42 @@ def read_kubernetes(path):
             runtime_metric_samples.append(record)
         elif record.get("record_type") == "runtime_metric_error":
             runtime_metric_errors.append(record)
-    for history in (*pods.values(), *hpas.values(), *deployments.values()):
+    for history in (*pods.values(), *hpas.values(), *deployments.values(), *events.values()):
         history.sort(key=lambda item: parse_time(item.get("observed_at")) or datetime.min.replace(tzinfo=timezone.utc))
-    return (pods, hpas, deployments, app_ready_metrics, scaledobjects, collector_gaps,
+    return (pods, hpas, deployments, events, app_ready_metrics, scaledobjects, collector_gaps,
             ignored_lines["count"], runtime_metric_samples, runtime_metric_errors)
 
 
-def summarize_pods(pods, app_ready_metrics, measurement_start):
+def first_lifecycle_event_timestamp(events, reason):
+    """Return the earliest source timestamp for a Kubernetes lifecycle Event reason."""
+    timestamps = []
+    for event in events:
+        if event.get("reason") != reason:
+            continue
+        # event_time is the API's canonical Event time.  Core/v1 Events often
+        # leave it unset, so first_timestamp is the best retained fallback.
+        for field in ("event_time", "first_timestamp", "last_timestamp",
+                      "series_last_observed_time", "creation_timestamp"):
+            timestamp = event.get(field)
+            if parse_time(timestamp):
+                timestamps.append(timestamp)
+                break
+    return min(timestamps, key=parse_time, default=None)
+
+
+def duration_seconds(start, end):
+    start_ms = epoch_ms(start)
+    end_ms = epoch_ms(end)
+    return (end_ms - start_ms) / 1000 if start_ms is not None and end_ms is not None and end_ms >= start_ms else None
+
+
+def summarize_pods(pods, events, app_ready_metrics, measurement_start):
     pod_to_ready = defaultdict(list)
     app_to_ready = defaultdict(list)
     app_to_app_ready = defaultdict(list)
+    app_phase_values = defaultdict(lambda: defaultdict(list))
     app_image_ids = defaultdict(set)
+    phase_rows = []
     unready = 0
     ready_pods = 0
     ready_pods_without_app_timestamp = 0
@@ -547,8 +575,9 @@ def summarize_pods(pods, app_ready_metrics, measurement_start):
         first = history[0]
         latest = history[-1]
         created_ms = epoch_ms(first.get("creation_timestamp"))
-        if created_ms is None or created_ms < measurement_start.timestamp() * 1000:
+        if created_ms is None:
             continue
+        include_in_summary = created_ms >= measurement_start.timestamp() * 1000
         ready_records = [item for item in history if item.get("ready") and item.get("ready_transition_at")]
         first_ready_at = min(
             (item["ready_transition_at"] for item in ready_records),
@@ -556,26 +585,29 @@ def summarize_pods(pods, app_ready_metrics, measurement_start):
             default=None,
         )
         app = latest.get("labels", {}).get("app") or first.get("labels", {}).get("app")
+        pull_started_at = first_lifecycle_event_timestamp(events.get(uid, []), "Pulling")
+        pull_finished_at = first_lifecycle_event_timestamp(events.get(uid, []), "Pulled")
+        container_created_at = first_lifecycle_event_timestamp(events.get(uid, []), "Created")
         for container in latest.get("containers", []):
             if container.get("image_id"):
                 app_image_ids[app].add(container["image_id"])
-        if first_ready_at and created_ms:
+        if include_in_summary and first_ready_at and created_ms:
             ready_ms = epoch_ms(first_ready_at)
             if ready_ms is not None and ready_ms >= created_ms:
                 pod_to_ready[app].append((ready_ms - created_ms) / 1000)
                 ready_pods += 1
-        if latest.get("event_type") != "DELETED" and not latest.get("ready"):
+        if include_in_summary and latest.get("event_type") != "DELETED" and not latest.get("ready"):
             unready += 1
 
         ready_metric = app_ready_metrics.get(uid)
-        if first_ready_at and not ready_metric:
+        if include_in_summary and first_ready_at and not ready_metric:
             ready_pods_without_app_timestamp += 1
         container_starts = [
             epoch_ms(container.get("started_at"))
             for container in latest.get("containers", [])
             if container.get("started_at")
         ]
-        if ready_metric and container_starts:
+        if include_in_summary and ready_metric and container_starts:
             started_ms = min(container_starts)
             app_ready_ms = ready_metric.get("application_ready_timestamp_ms")
             if app_ready_ms and app_ready_ms >= started_ms:
@@ -583,6 +615,45 @@ def summarize_pods(pods, app_ready_metrics, measurement_start):
                 ready_ms = epoch_ms(first_ready_at)
                 if ready_ms and ready_ms >= app_ready_ms:
                     app_to_ready[app].append((ready_ms - app_ready_ms) / 1000)
+
+        container_started_at = min(
+            (container.get("started_at") for container in latest.get("containers", []) if container.get("started_at")),
+            key=parse_time,
+            default=None,
+        )
+        app_main_at = ready_metric.get("application_main_timestamp_ms") if ready_metric else None
+        app_ready_at = ready_metric.get("application_ready_timestamp_ms") if ready_metric else None
+        phase_row = {
+            "pod_uid": uid,
+            "pod_name": latest.get("name") or first.get("name"),
+            "app": app or "unknown",
+            "node_name": latest.get("node_name") or first.get("node_name"),
+            "image_ids": ";".join(sorted({container.get("image_id") for container in latest.get("containers", []) if container.get("image_id")})),
+            "pod_created_at": first.get("creation_timestamp"),
+            "image_pull_started_at": pull_started_at,
+            "image_pull_finished_at": pull_finished_at,
+            "container_created_at": container_created_at,
+            "container_started_at": container_started_at,
+            "application_main_at": app_main_at,
+            "spring_ready_at": app_ready_at,
+            "kubernetes_ready_at": first_ready_at,
+        }
+        phase_boundaries = [
+            ("pod_creation_to_image_pull_start_seconds", "pod_created_at", "image_pull_started_at"),
+            ("image_pull_seconds", "image_pull_started_at", "image_pull_finished_at"),
+            ("image_pull_complete_to_container_created_seconds", "image_pull_finished_at", "container_created_at"),
+            ("container_create_to_started_seconds", "container_created_at", "container_started_at"),
+            ("container_start_to_application_main_seconds", "container_started_at", "application_main_at"),
+            ("application_main_to_spring_ready_seconds", "application_main_at", "spring_ready_at"),
+            ("spring_ready_to_kubernetes_ready_seconds", "spring_ready_at", "kubernetes_ready_at"),
+            ("pod_creation_to_kubernetes_ready_seconds", "pod_created_at", "kubernetes_ready_at"),
+        ]
+        for name, start, end in phase_boundaries:
+            value = duration_seconds(phase_row[start], phase_row[end])
+            phase_row[name] = value
+            if include_in_summary and value is not None:
+                app_phase_values[app][name].append(value)
+        phase_rows.append(phase_row)
 
     def stats(values):
         return {
@@ -594,11 +665,14 @@ def summarize_pods(pods, app_ready_metrics, measurement_start):
         }
 
     apps = {}
-    for app in sorted(set(pod_to_ready) | set(app_to_app_ready) | set(app_to_ready)):
+    for app in sorted(set(pod_to_ready) | set(app_to_app_ready) | set(app_to_ready) | set(app_phase_values)):
         apps[app or "unknown"] = {
             "pod_creation_to_kubernetes_ready": stats(pod_to_ready[app]),
             "container_start_to_spring_application_ready": stats(app_to_app_ready[app]),
             "spring_application_ready_to_pod_ready": stats(app_to_ready[app]),
+            "cold_start_phase_breakdown": {
+                name: stats(values) for name, values in sorted(app_phase_values[app].items())
+            },
             "observed_image_ids": sorted(app_image_ids[app]),
         }
     return {
@@ -606,7 +680,25 @@ def summarize_pods(pods, app_ready_metrics, measurement_start):
         "pods_not_ready_at_collection_end": unready,
         "ready_pods_in_measurement": ready_pods,
         "ready_pods_without_application_ready_timestamp": ready_pods_without_app_timestamp,
+        "phase_rows": phase_rows,
     }
+
+
+def write_pod_phase_ledger(rows, path):
+    fieldnames = [
+        "pod_uid", "pod_name", "app", "node_name", "image_ids", "pod_created_at",
+        "image_pull_started_at", "image_pull_finished_at", "container_created_at",
+        "container_started_at", "application_main_at", "spring_ready_at", "kubernetes_ready_at",
+        "pod_creation_to_image_pull_start_seconds", "image_pull_seconds",
+        "image_pull_complete_to_container_created_seconds", "container_create_to_started_seconds",
+        "container_start_to_application_main_seconds", "application_main_to_spring_ready_seconds",
+        "spring_ready_to_kubernetes_ready_seconds", "pod_creation_to_kubernetes_ready_seconds",
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as output:
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def deployment_matches_pod(selector, pod):
@@ -750,6 +842,7 @@ def main():
     parser.add_argument("--node-resources", help="CSV time series from kubectl top nodes")
     parser.add_argument("--pod-resources", help="CSV time series from kubectl top pods --containers")
     parser.add_argument("--pod-resource-errors", help="stderr log from the pod resource sampler")
+    parser.add_argument("--pod-phase-ledger", help="CSV destination for one lifecycle row per measured pod")
     parser.add_argument("--output", default="load-test-summary.json")
     parser.add_argument("--slo-p95-ms", type=float, default=500)
     parser.add_argument("--slo-window-seconds", type=int, default=30)
@@ -772,7 +865,7 @@ def main():
      max_active_vus, max_initialized_vus, phase_durations, phase_http_statuses) = read_k6(args.k6)
     if not phase_starts:
         raise SystemExit("No measured-phase POST samples found in k6 JSON output; check the test script and endpoint tags.")
-    (pods, hpas, deployments, app_ready_metrics, scaledobjects, collector_gaps,
+    (pods, hpas, deployments, events, app_ready_metrics, scaledobjects, collector_gaps,
      collector_log_lines_ignored, runtime_metric_samples, runtime_metric_errors) = read_kubernetes(args.kubernetes)
     phase_workflows = read_workflows(args.workflows, phase_starts, phase_durations)
     violations, slo_windows = slo_episodes(
@@ -804,6 +897,13 @@ def main():
     request_attempts_by_phase = {
         phase: len(values) for phase, values in phase_latencies.items()
     }
+    pod_startup = summarize_pods(pods, events, app_ready_metrics, min(phase_starts.values()))
+    phase_rows = pod_startup.pop("phase_rows")
+    phase_ledger_path = Path(args.pod_phase_ledger) if args.pod_phase_ledger else Path(args.output).with_name("pod-startup-phases.csv")
+    write_pod_phase_ledger(phase_rows, phase_ledger_path)
+    pod_startup["phase_ledger_file"] = str(phase_ledger_path)
+    pod_startup["phase_ledger_rows"] = len(phase_rows)
+
     summary = {
         "method": {
             "latency_source": "k6 POST /ecomm/order http_req_duration samples only",
@@ -845,7 +945,7 @@ def main():
         },
         "slo_violations": violations,
         "slo_windows": slo_windows,
-        "pod_startup": summarize_pods(pods, app_ready_metrics, min(phase_starts.values())),
+        "pod_startup": pod_startup,
         "scale_up": summarize_scaling(
             {phase: start for phase, start in phase_starts.items()
              if phase in phase_rates and (phase_rates[phase] is not None or phase == "ramp_up")},
@@ -878,6 +978,7 @@ def main():
             "pods": len(pods),
             "hpas": len(hpas),
             "deployments": len(deployments),
+            "pod_lifecycle_events": sum(len(history) for history in events.values()),
             "spring_application_ready_timestamps": len(app_ready_metrics),
             "runtime_metric_samples": len(runtime_metric_samples),
             "runtime_metric_sample_errors": len(runtime_metric_errors),

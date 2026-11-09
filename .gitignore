@@ -4,6 +4,7 @@ results/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
+ProblemStatement.pdf
 
 ### STS ###
 .apt_generated
@@ -32,3 +33,4 @@ build/
 
 ### VS Code ###
 .vscode/
+research-report/

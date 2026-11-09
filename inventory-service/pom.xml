@@ -190,6 +190,9 @@
 						<version>0.10.6</version>
 						<configuration>
 							<imageName>${project.artifactId}</imageName>
+							<buildArgs>
+								<buildArg>-march=compatibility</buildArg>
+							</buildArgs>
 						</configuration>
 						<executions>
 							<execution>

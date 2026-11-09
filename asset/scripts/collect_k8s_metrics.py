@@ -79,6 +79,7 @@ class Recorder:
     @staticmethod
     def pod_record(obj, event_type):
         metadata = obj.metadata
+        spec = obj.spec
         status = obj.status
         conditions = status.conditions or []
         ready_condition = next((item for item in conditions if item.type == "Ready"), None)
@@ -110,11 +111,51 @@ class Recorder:
                 for owner in (metadata.owner_references or [])
             ],
             "pod_ip": status.pod_ip,
+            "node_name": spec.node_name,
             "phase": status.phase,
             "ready": ready_condition.status == "True" if ready_condition else False,
             "ready_transition_at": iso(ready_condition.last_transition_time) if ready_condition else None,
             "containers": container_statuses,
         }
+
+    @staticmethod
+    def event_record(obj, event_type):
+        """Normalize Pod lifecycle Events without treating watch receipt time as event time."""
+        metadata = obj.metadata
+        involved = obj.involved_object
+        series = obj.series
+        return {
+            "record_type": "kubernetes",
+            "resource": "event",
+            "event_type": event_type,
+            "namespace": metadata.namespace,
+            "name": metadata.name,
+            "uid": metadata.uid,
+            "involved_object_uid": involved.uid if involved else None,
+            "involved_object_name": involved.name if involved else None,
+            "involved_object_kind": involved.kind if involved else None,
+            "reason": obj.reason,
+            "message": obj.message,
+            "type": obj.type,
+            # event_time is preferred.  Core/v1 Events often leave it empty,
+            # so retain first/last timestamps and the series time for audit.
+            "event_time": iso(obj.event_time),
+            "first_timestamp": iso(obj.first_timestamp),
+            "last_timestamp": iso(obj.last_timestamp),
+            "series_last_observed_time": iso(series.last_observed_time) if series else None,
+            "creation_timestamp": iso(metadata.creation_timestamp),
+            "count": series.count if series else obj.count,
+        }
+
+    def read_actuator_metric(self, pod_ip, metric_name):
+        url = f"http://{pod_ip}:{MANAGEMENT_PORT}/actuator/metrics/{metric_name}"
+        with urlopen(url, timeout=self.args.http_timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        value = next(
+            (item["value"] for item in payload.get("measurements", []) if item.get("statistic") == "VALUE"),
+            0,
+        )
+        return int(value) if value and value > 0 else None
 
     def capture_app_ready_metric(self, record):
         app = record["labels"].get("app")
@@ -125,15 +166,15 @@ class Recorder:
         if not record.get("ready"):
             return
 
-        url = f"http://{record['pod_ip']}:{port}/actuator/metrics/application.ready.timestamp"
         try:
-            with urlopen(url, timeout=self.args.http_timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-            value = next(
-                (item["value"] for item in payload.get("measurements", []) if item.get("statistic") == "VALUE"),
-                0,
-            )
-            if value and value > 0:
+            ready_timestamp = self.read_actuator_metric(record["pod_ip"], "application.ready.timestamp")
+            try:
+                main_timestamp = self.read_actuator_metric(record["pod_ip"], "application.main.timestamp")
+            except (URLError, TimeoutError, json.JSONDecodeError, KeyError, StopIteration):
+                # Preserve the established ready timestamp during a rolling
+                # upgrade if an older application image lacks the new metric.
+                main_timestamp = None
+            if ready_timestamp:
                 self.app_ready_recorded.add(pod_uid)
                 self.write({
                     "record_type": "application_ready_metric",
@@ -141,7 +182,8 @@ class Recorder:
                     "pod_name": record["name"],
                     "pod_uid": pod_uid,
                     "app": app,
-                    "application_ready_timestamp_ms": int(value),
+                    "application_ready_timestamp_ms": ready_timestamp,
+                    "application_main_timestamp_ms": main_timestamp,
                     "pod_ip": record["pod_ip"],
                 })
         except (URLError, TimeoutError, json.JSONDecodeError, KeyError, StopIteration) as exc:
@@ -337,6 +379,7 @@ class Recorder:
 
         streams = [
             ("pod", core.list_namespaced_pod, self.pod_record),
+            ("event", core.list_namespaced_event, self.event_record),
             ("deployment", apps.list_namespaced_deployment, self.deployment_record),
             ("hpa", autoscaling.list_namespaced_horizontal_pod_autoscaler, self.hpa_record),
             (

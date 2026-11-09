@@ -1,5 +1,6 @@
 package com.example.coordinator;
 
+import com.example.coordinator.metrics.ApplicationReadyTimestamp;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -12,6 +13,7 @@ import org.springframework.context.annotation.Import;
 public class CoordinatorApplication {
 
 	public static void main(String[] args) {
+		ApplicationReadyTimestamp.markMainEntered();
 		SpringApplication.run(CoordinatorApplication.class, args);
 	}
 
