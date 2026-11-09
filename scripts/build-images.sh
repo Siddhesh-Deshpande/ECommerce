@@ -11,6 +11,7 @@ PUSH=0
 BUILD_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 STAGING_IMAGES=()
 IMAGES=()
+declare -A SERVICE_BUILD_DURATIONS=()
 BUILD_METADATA="$ROOT_DIR/results/.last-image-build.txt"
 
 usage() {
@@ -44,6 +45,9 @@ declare -A MODULES=(
   [payment]=payment-service
 )
 
+BUILD_STARTED_NS="$(date +%s%N)"
+BUILD_SETUP_STARTED_NS="$BUILD_STARTED_NS"
+BUILD_SETUP_DURATION_SECONDS=0
 if [[ "$STRATEGY" == "jib" ]]; then
   MAVEN_JAVA_VERSION="$(mvn -version | awk '/^Java version:/ {print $3; exit}')"
   if [[ "$MAVEN_JAVA_VERSION" =~ ^([0-9]+) ]]; then
@@ -58,6 +62,8 @@ if [[ "$STRATEGY" == "jib" ]]; then
   # Install the shared events module and service artifacts before Jib runs each
   # service POM independently, so Maven can resolve the reactor dependency.
   mvn -B -f "$ROOT_DIR/pom.xml" -DskipTests clean install
+  BUILD_SETUP_ENDED_NS="$(date +%s%N)"
+  BUILD_SETUP_DURATION_SECONDS="$(awk -v start="$BUILD_SETUP_STARTED_NS" -v end="$BUILD_SETUP_ENDED_NS" 'BEGIN {printf "%.3f", (end-start)/1000000000}')"
 fi
 
 for service in coordinator order inventory payment; do
@@ -65,6 +71,7 @@ for service in coordinator order inventory payment; do
   # Build under temporary tags so a failed fourth build cannot leave the
   # canonical latest set containing a mix of old and new service images.
   image="${REGISTRY}/${service}:build-${BUILD_ID}"
+  SERVICE_BUILD_STARTED_NS="$(date +%s%N)"
   case "$STRATEGY" in
     multistage)
       docker build \
@@ -85,6 +92,8 @@ for service in coordinator order inventory payment; do
         "$ROOT_DIR"
       ;;
   esac
+  SERVICE_BUILD_ENDED_NS="$(date +%s%N)"
+  SERVICE_BUILD_DURATIONS[$service]="$(awk -v start="$SERVICE_BUILD_STARTED_NS" -v end="$SERVICE_BUILD_ENDED_NS" 'BEGIN {printf "%.3f", (end-start)/1000000000}')"
   STAGING_IMAGES+=("$image")
   IMAGES+=("${REGISTRY}/${service}:${TAG}")
 done
@@ -93,6 +102,8 @@ done
 for index in "${!IMAGES[@]}"; do
   docker image tag "${STAGING_IMAGES[$index]}" "${IMAGES[$index]}"
 done
+BUILD_ENDED_NS="$(date +%s%N)"
+BUILD_DURATION_SECONDS="$(awk -v start="$BUILD_STARTED_NS" -v end="$BUILD_ENDED_NS" 'BEGIN {printf "%.3f", (end-start)/1000000000}')"
 
 # Do not publish a mixed strategy set if one of the four image builds fails.
 if (( PUSH )); then
@@ -106,12 +117,17 @@ BUILD_METADATA_TEMP="$BUILD_METADATA.tmp.$$"
 {
   printf 'strategy=%s\nimage_registry=%s\nimage_tag=%s\nbuild_id=%s\nbuilt_at_utc=%s\npushed=%s\n' \
     "$STRATEGY" "$REGISTRY" "$TAG" "$BUILD_ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PUSH"
+  printf 'build_duration_seconds=%s\nbuild_setup_duration_seconds=%s\nbuild_duration_includes_push=false\n' \
+    "$BUILD_DURATION_SECONDS" "$BUILD_SETUP_DURATION_SECONDS"
   for service in coordinator order inventory payment; do
     image="${REGISTRY}/${service}:${TAG}"
-    image_id="$(docker image inspect --format '{{.Id}}' "$image")"
-    repo_digests="$(docker image inspect --format '{{json .RepoDigests}}' "$image")"
-    printf '%s_image=%s\n%s_image_id=%s\n%s_repo_digests=%s\n' \
-      "$service" "$image" "$service" "$image_id" "$service" "$repo_digests"
+    image_inspect="$(docker image inspect --format '{{.Id}}|{{json .RepoDigests}}|{{.Size}}|{{len .RootFS.Layers}}' "$image")"
+    IFS='|' read -r image_id repo_digests image_size_bytes layer_count <<<"$image_inspect"
+    image_size_mb="$(awk -v bytes="$image_size_bytes" 'BEGIN {printf "%.3f", bytes/1000000}')"
+    printf '%s_image=%s\n%s_image_id=%s\n%s_repo_digests=%s\n%s_image_size_bytes=%s\n%s_image_size_mb=%s\n%s_layer_count=%s\n%s_build_duration_seconds=%s\n' \
+      "$service" "$image" "$service" "$image_id" "$service" "$repo_digests" \
+      "$service" "$image_size_bytes" "$service" "$image_size_mb" "$service" "$layer_count" \
+      "$service" "${SERVICE_BUILD_DURATIONS[$service]}"
   done
 } >"$BUILD_METADATA_TEMP"
 mv "$BUILD_METADATA_TEMP" "$BUILD_METADATA"
@@ -124,3 +140,4 @@ printf '\nImages built with %s strategy:\n' "$STRATEGY"
 for service in coordinator order inventory payment; do
   printf '  %s/%s:%s\n' "$REGISTRY" "$service" "$TAG"
 done
+printf 'Build time (all four images, excluding push): %s seconds\n' "$BUILD_DURATION_SECONDS"

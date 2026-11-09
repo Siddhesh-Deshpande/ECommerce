@@ -65,11 +65,31 @@ IMAGE_REPOSITORY_PREFIX=registry.example.com/team IMAGE_TAG=latest \
   ./run.sh
 ```
 
-Each run copies the last image-build metadata into its results directory and
-captures Kubernetes pod JSON before and after the load. The pod snapshots
-include the image IDs actually used by the cluster. The load report also counts
-HTTP response status codes by phase, which helps distinguish application 4xx/5xx
-responses from transport failures.
+The build script records total local build time (including Jib's Maven setup,
+excluding registry push), per-service build times, Docker-reported image size,
+root filesystem layer count, image IDs, and digests in
+`results/.last-image-build.txt`. The run copies that metadata into its results
+directory and includes it under `image_build` in `metrics-report.json`. A run
+started without first using this build script has no associated build metadata;
+the report marks it missing rather than guessing from pod timings.
+
+For an independent wall-clock check, run this command (replace the strategy as
+needed):
+
+```bash
+/usr/bin/time -p scripts/build-images.sh graalvm
+```
+
+The script's `build_duration_seconds` excludes `--push`; `/usr/bin/time`
+includes the whole command, including push if `--push` is supplied. For study
+results, repeat each strategy at least five times with the same build-cache
+policy and retain each run's metadata before the next build overwrites
+`.last-image-build.txt`.
+
+Each experiment also captures Kubernetes pod JSON before and after the load.
+The pod snapshots include the image IDs actually used by the cluster. The load
+report counts HTTP response status codes by phase, which helps distinguish
+application 4xx/5xx responses from transport failures.
 
 GraalVM native compilation takes substantially more time and memory than the
 JVM image builds. It also changes the runtime model, so record it as a separate

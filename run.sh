@@ -12,6 +12,8 @@ RESULTS_ROOT="${RESULTS_ROOT:-${ROOT_DIR}/results}"
 SLO_P95_MS="${SLO_P95_MS:-500}"
 SLO_WINDOW_SECONDS="${SLO_WINDOW_SECONDS:-30}"
 SLO_MIN_REQUESTS="${SLO_MIN_REQUESTS:-30}"
+SLO_STABLE_WINDOWS="${SLO_STABLE_WINDOWS:-2}"
+SLO_START_PHASE="${SLO_START_PHASE:-}"
 BURST_RATE="${BURST_RATE:-15}"
 PEAK_RATE="${PEAK_RATE:-50}"
 TARGET_RPS="${TARGET_RPS:-}"
@@ -58,6 +60,7 @@ Environment:
   METRICS_COLLECTOR_IMAGE  Registry image for non-Minikube/non-Kind clusters.
   BURST_RATE / PEAK_RATE   k6 phase rates (defaults: 15 and 50 iterations/s).
   TARGET_RPS               Run one target with a ramp profile instead of both burst phases.
+  SLO_START_PHASE          Anchor SLO windows at a named k6 phase, e.g. the spike phase.
   WARMUP_RATE              Single-target warm-up rate (default: 3 RPS).
   WARMUP_SECONDS           Single-target warm-up duration (default: 120).
   RAMP_UP_SECONDS          Single-target ramp duration (default: 300).
@@ -442,6 +445,8 @@ else
 fi
 {
   printf 'run_id=%s\n' "$RUN_ID"
+  printf 'slo_p95_ms=%s\nslo_window_seconds=%s\nslo_min_requests=%s\nslo_stable_windows=%s\nslo_start_phase=%s\n' \
+    "$SLO_P95_MS" "$SLO_WINDOW_SECONDS" "$SLO_MIN_REQUESTS" "$SLO_STABLE_WINDOWS" "$SLO_START_PHASE"
   printf 'load_script_sha256=%s\n' "$(sha256sum "$ROOT_DIR/asset/scripts/load_testing.js" | awk '{print $1}')"
   printf 'k6_version=%s\n' "$(k6 version 2>&1 | head -n1)"
   printf 'profile_mode=%s\n' "$([[ -n "$TARGET_RPS" ]] && echo single_target || echo legacy)"
@@ -624,10 +629,13 @@ python3 "$ROOT_DIR/asset/scripts/analyze_load_test.py" \
   --pod-resources "$RESULTS_DIR/pod-resource-samples.csv" \
   --pod-resource-errors "$RESULTS_DIR/pod-sampler-stderr.log" \
   --pod-phase-ledger "$RESULTS_DIR/pod-startup-phases.csv" \
+  --image-build-metadata "$RESULTS_DIR/image-build-metadata.txt" \
   --output "$RESULTS_DIR/metrics-report.json" \
   --slo-p95-ms "$SLO_P95_MS" \
   --slo-window-seconds "$SLO_WINDOW_SECONDS" \
   --slo-min-requests "$SLO_MIN_REQUESTS" \
+  --slo-stable-windows "$SLO_STABLE_WINDOWS" \
+  --slo-start-phase "$SLO_START_PHASE" \
   --burst-rate "$BURST_RATE" \
   --peak-rate "$PEAK_RATE" \
   --target-rps "${TARGET_RPS:-0}" \

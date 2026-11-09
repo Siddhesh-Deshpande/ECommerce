@@ -2,9 +2,9 @@
 
 ## Research objective and deferred measurements
 
-The research objective is to compare the existing and alternative container image generation strategies under the same e-commerce workload and Kubernetes configuration. The immediate priority is to make the current load test reliably deliver its configured workload and correctly report per-phase request results, order completion times, completion coverage, and scaling behavior. Do not treat a run as a valid comparison if the load generator fails to deliver the scheduled arrivals or phase/workflow measurements are incomplete.
+The paper's primary story is image strategy → image acquisition/runtime initialization → fresh-Pod readiness → SLO-violation duration after scale-up. Request latency, end-to-end workflow latency, and resource-use results are supporting steady-state parity evidence, not the main contribution. Compare them only across repeated, matched strategy runs at equivalent rates after startup. Do not treat a run as a valid comparison if the load generator fails to deliver scheduled arrivals or phase/workflow measurements are incomplete.
 
-The report collects per-container pod CPU and memory from metrics-server, CPU throttling from Prometheus scraping each kubelet's cAdvisor endpoint, and pod/container/application readiness timestamps. Image build duration and image size remain separate measurements for the fuller image-strategy comparison.
+The report collects per-container pod CPU and memory from metrics-server, CPU throttling from Prometheus scraping each kubelet's cAdvisor endpoint, and pod/container/application readiness timestamps. When images were built with `scripts/build-images.sh`, the report also includes build duration, image size, and root filesystem layer count under `image_build`; missing build metadata is reported as missing rather than inferred.
 
 ## One-command experiment
 
@@ -131,7 +131,7 @@ python3 asset/scripts/analyze_load_test.py \
   --slo-min-requests 30
 ```
 
-The report includes per-phase target and observed request rates, started iterations, request latency (mean, p50, p95, p99), HTTP/submission error rates, counts and terminal latency for both `COMPLETED` and `ABORTED` workflows, non-terminal workflow counts, dropped k6 iterations and VU counts, pod lifecycle percentiles, and scale-up timing per KEDA-managed HPA. SLO violations are calculated on fixed 30-second windows with at least 30 submission samples; for the default strict `<500 ms` SLO, recovery requires two consecutive eligible windows below 500 ms. Windows with too few requests are omitted rather than treated as passing. If the workflow drain reaches its timeout, the report exposes non-terminal workflows and terminal latency coverage so the measured latency population is clear.
+The report includes per-phase target and observed request rates, started iterations, request latency (mean, p50, p95, p99), HTTP/submission error rates, counts and terminal latency for both `COMPLETED` and `ABORTED` workflows, non-terminal workflow counts, dropped k6 iterations and VU counts, pod lifecycle percentiles, and scale-up timing per KEDA-managed HPA. SLO analysis groups Coordinator POST latencies into fixed 30-second windows with at least 30 requests. A window violates the default `<500 ms` p95 SLO when p95 is `>=500 ms`. An episode begins at the first violating window and ends at the first immediately following eligible good window, with recovery confirmed by two consecutive good windows. Its duration is quantized to 30-second window boundaries; the report also gives confirmation time, violating-window count, and p95 values. Missing/under-sampled windows are not treated as passing and cannot be bridged to claim recovery. Set `SLO_START_PHASE` to align windows with that k6 phase's scheduled start and exclude earlier requests; use this for the explicit spike phase. The report distinguishes `no_violation` (zero seconds), `recovered`, `unresolved` (lower bound only), and `insufficient_data`. This duration measures time p95 is actually above the SLO, not time from spike start. If the workflow drain reaches its timeout, the report exposes non-terminal workflow counts and terminal-latency coverage.
 
 The startup report separates:
 
@@ -141,6 +141,12 @@ The startup report separates:
 - Spring ready event to Pod Ready condition (probe/dependency and scheduling interval).
 
 Each `run.sh` result directory also contains `pod-startup-phases.csv`, one raw timestamp row per Pod created during measurement. Where Kubernetes Events are emitted, it additionally records image-pull start/end and container-created timestamps. Event timestamps are operational Kubernetes records and can be delayed, aggregated, or unavailable on a particular cluster; retain the source `kubernetes-events.jsonl` and treat a missing phase value as missing rather than zero.
+
+See [STARTUP_METRICS.md](STARTUP_METRICS.md) for the exact source, calculation, precision, and interpretation of every startup ledger/report metric, including the distinction between image-pull operation duration and duration including waiting.
+
+## Paper result hierarchy
+
+Present results in this order: (1) SLO-violation episode duration after the load spike, (2) startup phase breakdown and fresh-Pod Ready time, (3) autoscaler reaction and Pod provisioning as explanatory results, (4) mitigation effects, and (5) a compact steady-state parity table. Keep request/workflow latency and resource use in that final supporting subsection (or appendix if space is tight). State that steady-state parity is supported only after comparing repeated runs with the same rate, configuration, and warm application state. The generated report preserves all raw per-phase values but labels the steady-state group as supporting evidence and names the primary outcomes separately.
 
 The scale report defines `T0` as the first load marker emitted immediately before a phase's first POST. `T1` is the first observed HPA external metric value above its configured target when that metric was below target at phase start. `T2` is the collector-observed desired-replica increase, `T3` is the new pod's API creation timestamp, and `T4` is its Ready-condition transition timestamp. This gives `T1−T0` for metric reaction, `T2−T0` for replica decision, `T2−T1` for decision delay, `T4−T2` for pod provisioning, and `T4−T0` for total response. T1 is left unset when the HPA metric sample is unavailable or already above target at phase start. The collector watch receipt time is used for T1/T2, so their resolution is affected by API watch delivery and cluster clock synchronization. Use synchronized clocks on the k6 runner, cluster nodes, and API control plane.
 
