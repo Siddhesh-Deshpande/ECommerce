@@ -67,11 +67,28 @@ IMAGE_REPOSITORY_PREFIX=registry.example.com/team IMAGE_TAG=latest \
 
 The build script records total local build time (including Jib's Maven setup,
 excluding registry push), per-service build times, Docker-reported image size,
-root filesystem layer count, image IDs, and digests in
-`results/.last-image-build.txt`. The run copies that metadata into its results
-directory and includes it under `image_build` in `metrics-report.json`. A run
-started without first using this build script has no associated build metadata;
-the report marks it missing rather than guessing from pod timings.
+root filesystem layer count, image IDs, and digests in a registry-and-tag keyed
+file under `results/image-build-metadata/`. It also updates
+`results/.last-image-build.txt` as a convenience pointer to the most recent
+build. `run.sh` selects metadata by the requested `IMAGE_REPOSITORY_PREFIX` and
+`IMAGE_TAG`, so building several tagged strategies before running one keeps the
+correct strategy details and digest verification. The run copies the matching
+metadata into its results directory and includes it under `image_build` in
+`metrics-report.json`.
+
+For example, build and push each strategy once, then choose the deployment tag
+per experiment:
+
+```bash
+IMAGE_TAG=multistage scripts/build-images.sh multistage --push
+IMAGE_TAG=jib scripts/build-images.sh jib --push
+IMAGE_TAG=graalvm scripts/build-images.sh graalvm --push
+
+IMAGE_TAG=graalvm ./run.sh
+```
+
+For a kubeadm/remote cluster, also set `METRICS_COLLECTOR_IMAGE` to a registry
+name reachable by the cluster nodes when running `run.sh`.
 
 For an independent wall-clock check, run this command (replace the strategy as
 needed):
@@ -83,8 +100,8 @@ needed):
 The script's `build_duration_seconds` excludes `--push`; `/usr/bin/time`
 includes the whole command, including push if `--push` is supplied. For study
 results, repeat each strategy at least five times with the same build-cache
-policy and retain each run's metadata before the next build overwrites
-`.last-image-build.txt`.
+policy. Each build's registry-and-tag metadata file is retained separately, so
+the per-strategy records are not overwritten by subsequent strategy builds.
 
 Each experiment also captures Kubernetes pod JSON before and after the load.
 The pod snapshots include the image IDs actually used by the cluster. The load

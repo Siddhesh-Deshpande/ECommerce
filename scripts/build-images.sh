@@ -12,7 +12,8 @@ BUILD_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 STAGING_IMAGES=()
 IMAGES=()
 declare -A SERVICE_BUILD_DURATIONS=()
-BUILD_METADATA="$ROOT_DIR/results/.last-image-build.txt"
+BUILD_METADATA_DIR="$ROOT_DIR/results/image-build-metadata"
+BUILD_METADATA_LATEST="$ROOT_DIR/results/.last-image-build.txt"
 
 usage() {
   cat <<'EOF'
@@ -36,7 +37,13 @@ case "$STRATEGY" in multistage|jib|graalvm) ;; *) usage >&2; exit 2 ;; esac
 
 command -v mvn >/dev/null || { echo "mvn is required" >&2; exit 1; }
 command -v docker >/dev/null || { echo "docker is required" >&2; exit 1; }
-rm -f "$BUILD_METADATA"
+command -v sha256sum >/dev/null || { echo "sha256sum is required" >&2; exit 1; }
+REGISTRY_KEY_INPUT="$REGISTRY"
+if [[ "$REGISTRY_KEY_INPUT" == docker.io/* ]]; then
+  REGISTRY_KEY_INPUT="${REGISTRY_KEY_INPUT#docker.io/}"
+fi
+REGISTRY_KEY="$(printf '%s' "$REGISTRY_KEY_INPUT" | sha256sum | cut -c1-12)"
+BUILD_METADATA="$BUILD_METADATA_DIR/${TAG}-${REGISTRY_KEY}.txt"
 
 declare -A MODULES=(
   [coordinator]=coordinator
@@ -112,7 +119,7 @@ if (( PUSH )); then
   done
 fi
 
-mkdir -p "$ROOT_DIR/results"
+mkdir -p "$BUILD_METADATA_DIR"
 BUILD_METADATA_TEMP="$BUILD_METADATA.tmp.$$"
 {
   printf 'strategy=%s\nimage_registry=%s\nimage_tag=%s\nbuild_id=%s\nbuilt_at_utc=%s\npushed=%s\n' \
@@ -131,6 +138,9 @@ BUILD_METADATA_TEMP="$BUILD_METADATA.tmp.$$"
   done
 } >"$BUILD_METADATA_TEMP"
 mv "$BUILD_METADATA_TEMP" "$BUILD_METADATA"
+BUILD_METADATA_LATEST_TEMP="$BUILD_METADATA_LATEST.tmp.$$"
+cp "$BUILD_METADATA" "$BUILD_METADATA_LATEST_TEMP"
+mv "$BUILD_METADATA_LATEST_TEMP" "$BUILD_METADATA_LATEST"
 
 for image in "${STAGING_IMAGES[@]}"; do
   docker image rm "$image" >/dev/null
@@ -141,3 +151,4 @@ for service in coordinator order inventory payment; do
   printf '  %s/%s:%s\n' "$REGISTRY" "$service" "$TAG"
 done
 printf 'Build time (all four images, excluding push): %s seconds\n' "$BUILD_DURATION_SECONDS"
+printf 'Build metadata: %s\n' "$BUILD_METADATA"

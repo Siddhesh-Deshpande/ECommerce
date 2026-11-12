@@ -420,28 +420,37 @@ mkdir -p "$RESULTS_DIR"
 log "Saving experiment artifacts to $RESULTS_DIR"
 log "Load profile: ${LOAD_PROFILE}; ${PREALLOCATED_VUS} preallocated VUs, ${HTTP_TIMEOUT_SECONDS}s request timeout."
 log "The single VU pool is sized as highest phase rate × request timeout × ${VU_SAFETY_FACTOR}; k6 will not allocate VUs dynamically."
-IMAGE_BUILD_METADATA="$ROOT_DIR/results/.last-image-build.txt"
 IMAGE_BUILD_STRATEGY="unknown"
 IMAGE_BUILD_MATCH="missing"
 IMAGE_BUILD_PUSHED="unknown"
+DEPLOY_REGISTRY_KEY="$(printf '%s' "$(normalize_image_prefix "$IMAGE_REPOSITORY_PREFIX")" | sha256sum | cut -c1-12)"
+IMAGE_BUILD_METADATA="$ROOT_DIR/results/image-build-metadata/${IMAGE_TAG}-${DEPLOY_REGISTRY_KEY}.txt"
+if [[ ! -f "$IMAGE_BUILD_METADATA" && -f "$ROOT_DIR/results/.last-image-build.txt" ]]; then
+  LEGACY_BUILD_METADATA="$ROOT_DIR/results/.last-image-build.txt"
+  LEGACY_IMAGE_REGISTRY="$(awk -F= '$1 == "image_registry" {sub(/^[^=]*=/, ""); print; exit}' "$LEGACY_BUILD_METADATA")"
+  LEGACY_IMAGE_TAG="$(awk -F= '$1 == "image_tag" {sub(/^[^=]*=/, ""); print; exit}' "$LEGACY_BUILD_METADATA")"
+  if [[ "$(normalize_image_prefix "$LEGACY_IMAGE_REGISTRY")" == "$(normalize_image_prefix "$IMAGE_REPOSITORY_PREFIX")" \
+      && "$LEGACY_IMAGE_TAG" == "$IMAGE_TAG" ]]; then
+    IMAGE_BUILD_METADATA="$LEGACY_BUILD_METADATA"
+  fi
+fi
 if [[ -f "$IMAGE_BUILD_METADATA" ]]; then
-  cp "$IMAGE_BUILD_METADATA" "$RESULTS_DIR/image-build-metadata.txt"
-  IMAGE_BUILD_STRATEGY="$(awk -F= '$1 == "strategy" {sub(/^[^=]*=/, ""); print; exit}' "$IMAGE_BUILD_METADATA")"
   BUILD_IMAGE_REGISTRY="$(awk -F= '$1 == "image_registry" {sub(/^[^=]*=/, ""); print; exit}' "$IMAGE_BUILD_METADATA")"
   BUILD_IMAGE_TAG="$(awk -F= '$1 == "image_tag" {sub(/^[^=]*=/, ""); print; exit}' "$IMAGE_BUILD_METADATA")"
-  IMAGE_BUILD_PUSHED="$(awk -F= '$1 == "pushed" {sub(/^[^=]*=/, ""); print; exit}' "$IMAGE_BUILD_METADATA")"
   if [[ "$(normalize_image_prefix "$BUILD_IMAGE_REGISTRY")" == "$(normalize_image_prefix "$IMAGE_REPOSITORY_PREFIX")" \
       && "$BUILD_IMAGE_TAG" == "$IMAGE_TAG" ]]; then
+    cp "$IMAGE_BUILD_METADATA" "$RESULTS_DIR/image-build-metadata.txt"
+    IMAGE_BUILD_STRATEGY="$(awk -F= '$1 == "strategy" {sub(/^[^=]*=/, ""); print; exit}' "$IMAGE_BUILD_METADATA")"
+    IMAGE_BUILD_PUSHED="$(awk -F= '$1 == "pushed" {sub(/^[^=]*=/, ""); print; exit}' "$IMAGE_BUILD_METADATA")"
     IMAGE_BUILD_MATCH="yes"
-  else
-    IMAGE_BUILD_MATCH="no"
-    log "WARNING: Last image build metadata does not match deployed prefix/tag (${IMAGE_REPOSITORY_PREFIX}:$IMAGE_TAG)."
   fi
-  if [[ "$IMAGE_BUILD_MATCH" == "yes" && "$IMAGE_BUILD_PUSHED" != "1" ]]; then
+fi
+if [[ "$IMAGE_BUILD_MATCH" == "yes" ]]; then
+  if [[ "$IMAGE_BUILD_PUSHED" != "1" ]]; then
     log "WARNING: The matching image build was not pushed. The deployments use imagePullPolicy=Always, so the cluster may run a different registry image."
   fi
 else
-  log "WARNING: No image build metadata found; this run will record the actual pod image IDs for later identification."
+  log "WARNING: No build metadata matches ${IMAGE_REPOSITORY_PREFIX}:$IMAGE_TAG; runtime image digest verification will be skipped."
 fi
 {
   printf 'run_id=%s\n' "$RUN_ID"
