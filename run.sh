@@ -31,6 +31,7 @@ LOAD_TEST_USER_IDS="${LOAD_TEST_USER_IDS:-1,2,3,4,5,6,7,8,9,10,11,12}"
 LOAD_TEST_ITEM_IDS="${LOAD_TEST_ITEM_IDS:-1,2,3,4,5,6,7,8,9,10,11,12}"
 LOAD_TEST_ITEM_PRICES="${LOAD_TEST_ITEM_PRICES:-1:10,2:10,3:10,4:10,5:10,6:10,7:20,8:20,9:20,10:20,11:20,12:20}"
 METRICS_COLLECTOR_IMAGE="${METRICS_COLLECTOR_IMAGE:-}"
+METRICS_COLLECTOR_IMAGE_PREBUILT="${METRICS_COLLECTOR_IMAGE_PREBUILT:-0}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
 IMAGE_REPOSITORY_PREFIX="${IMAGE_REPOSITORY_PREFIX:-siddhesh1712}"
 
@@ -58,6 +59,7 @@ Options:
 
 Environment:
   METRICS_COLLECTOR_IMAGE  Registry image for non-Minikube/non-Kind clusters.
+  METRICS_COLLECTOR_IMAGE_PREBUILT=1  Use an already-pushed observer image; skip local build and push.
   BURST_RATE / PEAK_RATE   k6 phase rates (defaults: 15 and 50 iterations/s).
   TARGET_RPS               Run one target with a ramp profile instead of both burst phases.
   SLO_START_PHASE          Anchor SLO windows at a named k6 phase, e.g. the spike phase.
@@ -226,8 +228,17 @@ require_command kubectl
 require_command python3
 require_command curl
 require_command sha256sum
+[[ "$METRICS_COLLECTOR_IMAGE_PREBUILT" == "0" || "$METRICS_COLLECTOR_IMAGE_PREBUILT" == "1" ]] || \
+  die "METRICS_COLLECTOR_IMAGE_PREBUILT must be 0 or 1."
+if [[ "$METRICS_COLLECTOR_IMAGE_PREBUILT" == "1" && -z "$METRICS_COLLECTOR_IMAGE" ]]; then
+  die "Set METRICS_COLLECTOR_IMAGE when METRICS_COLLECTOR_IMAGE_PREBUILT=1."
+fi
 if (( ! DEPLOY_ONLY )); then
-  require_command docker
+  if [[ "$METRICS_COLLECTOR_IMAGE_PREBUILT" != "1" ]]; then
+    require_command docker
+    docker info >/dev/null 2>&1 || die \
+      "Docker daemon is unavailable. Start Docker or set METRICS_COLLECTOR_IMAGE_PREBUILT=1 with an image already pushed to the registry."
+  fi
   require_command k6
 fi
 kubectl cluster-info >/dev/null 2>&1 || die "kubectl cannot reach the selected cluster. Check your kubeconfig/context."
@@ -310,17 +321,21 @@ if (( DEPLOY_STACK )); then
   if (( ! DEPLOY_ONLY )); then
     # Start lifecycle collection before creating application pods so the first
     # image pulls and container events are observed, not only later scale-ups.
-    if [[ -z "$METRICS_COLLECTOR_IMAGE" ]]; then
-      METRICS_COLLECTOR_IMAGE="load-metrics-collector:${RUN_ID}"
-    fi
-    log "Building metrics observer image: $METRICS_COLLECTOR_IMAGE"
-    docker build -f "$ROOT_DIR/asset/scripts/metrics-collector.Dockerfile" -t "$METRICS_COLLECTOR_IMAGE" "$ROOT_DIR"
-    if [[ "$CONTEXT" == *minikube* ]]; then
-      minikube image load "$METRICS_COLLECTOR_IMAGE"
-    elif [[ "$CONTEXT" == kind-* ]]; then
-      kind load docker-image "$METRICS_COLLECTOR_IMAGE"
+    if [[ "$METRICS_COLLECTOR_IMAGE_PREBUILT" == "1" ]]; then
+      log "Using prebuilt metrics observer image: $METRICS_COLLECTOR_IMAGE"
     else
-      docker push "$METRICS_COLLECTOR_IMAGE"
+      if [[ -z "$METRICS_COLLECTOR_IMAGE" ]]; then
+        METRICS_COLLECTOR_IMAGE="load-metrics-collector:${RUN_ID}"
+      fi
+      log "Building metrics observer image: $METRICS_COLLECTOR_IMAGE"
+      docker build -f "$ROOT_DIR/asset/scripts/metrics-collector.Dockerfile" -t "$METRICS_COLLECTOR_IMAGE" "$ROOT_DIR"
+      if [[ "$CONTEXT" == *minikube* ]]; then
+        minikube image load "$METRICS_COLLECTOR_IMAGE"
+      elif [[ "$CONTEXT" == kind-* ]]; then
+        kind load docker-image "$METRICS_COLLECTOR_IMAGE"
+      else
+        docker push "$METRICS_COLLECTOR_IMAGE"
+      fi
     fi
 
     kubectl apply -f "$ROOT_DIR/asset/scripts/metrics-collector-rbac.yaml"
@@ -492,17 +507,21 @@ postgres_psql -d postgres --csv -v ON_ERROR_STOP=1 \
   >"$RESULTS_DIR/postgres-connections-before.csv"
 
 if (( ! COLLECTOR_STARTED )); then
-if [[ -z "$METRICS_COLLECTOR_IMAGE" ]]; then
-  METRICS_COLLECTOR_IMAGE="load-metrics-collector:${RUN_ID}"
-fi
-log "Building metrics observer image: $METRICS_COLLECTOR_IMAGE"
-docker build -f "$ROOT_DIR/asset/scripts/metrics-collector.Dockerfile" -t "$METRICS_COLLECTOR_IMAGE" "$ROOT_DIR"
-if [[ "$CONTEXT" == *minikube* ]]; then
-  minikube image load "$METRICS_COLLECTOR_IMAGE"
-elif [[ "$CONTEXT" == kind-* ]]; then
-  kind load docker-image "$METRICS_COLLECTOR_IMAGE"
+if [[ "$METRICS_COLLECTOR_IMAGE_PREBUILT" == "1" ]]; then
+  log "Using prebuilt metrics observer image: $METRICS_COLLECTOR_IMAGE"
 else
-  docker push "$METRICS_COLLECTOR_IMAGE"
+  if [[ -z "$METRICS_COLLECTOR_IMAGE" ]]; then
+    METRICS_COLLECTOR_IMAGE="load-metrics-collector:${RUN_ID}"
+  fi
+  log "Building metrics observer image: $METRICS_COLLECTOR_IMAGE"
+  docker build -f "$ROOT_DIR/asset/scripts/metrics-collector.Dockerfile" -t "$METRICS_COLLECTOR_IMAGE" "$ROOT_DIR"
+  if [[ "$CONTEXT" == *minikube* ]]; then
+    minikube image load "$METRICS_COLLECTOR_IMAGE"
+  elif [[ "$CONTEXT" == kind-* ]]; then
+    kind load docker-image "$METRICS_COLLECTOR_IMAGE"
+  else
+    docker push "$METRICS_COLLECTOR_IMAGE"
+  fi
 fi
 
 kubectl apply -f "$ROOT_DIR/asset/scripts/metrics-collector-rbac.yaml"
