@@ -76,7 +76,6 @@ spec:
               cpu: "250m"
             limits:
               memory: "512Mi"
-              cpu: "2"
 
 
 ---
