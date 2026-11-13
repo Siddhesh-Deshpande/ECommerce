@@ -103,6 +103,83 @@ normalize_image_prefix() {
     *) printf '%s' "$1" ;;
   esac
 }
+render_app_manifest() {
+  local manifest="$1"
+  local service="$2"
+  python3 - "$manifest" "$service" "$IMAGE_REPOSITORY_PREFIX/$service:$IMAGE_TAG" "${RUN_ID}-$$" <<'PY'
+import pathlib
+import sys
+
+path, service, image, run_id = sys.argv[1:]
+lines = pathlib.Path(path).read_text(encoding="utf-8").splitlines(keepends=True)
+image_lines = [i for i, line in enumerate(lines) if line.lstrip().startswith("image:")]
+if len(image_lines) != 1:
+    raise SystemExit(f"Expected one image field in {path}; found {len(image_lines)}")
+index = image_lines[0]
+indent = lines[index][:len(lines[index]) - len(lines[index].lstrip())]
+lines[index] = f"{indent}image: {image}\n"
+
+# A per-run template annotation forces exactly one rollout while the selected
+# image is already present in the manifest. This avoids briefly starting the
+# manifest's default :latest image before switching to IMAGE_TAG.
+label = f"        app: {service}\n"
+if lines.count(label) != 1:
+    raise SystemExit(f"Expected one pod-template app label for {service} in {path}")
+index = lines.index(label) + 1
+lines[index:index] = [
+    "      annotations:\n",
+    f"        ecomm.load-run: {run_id}\n",
+]
+sys.stdout.write("".join(lines))
+PY
+}
+reset_existing_app_deployments() {
+  local deployment app attempt remaining_pods remaining_hpas
+  log "Removing previous autoscaling and stopping existing application Pods."
+  kubectl -n "$NAMESPACE" delete -f "$ROOT_DIR/service-deployment/autoscaling.yml" --ignore-not-found=true --wait=true
+  for attempt in $(seq 1 300); do
+    remaining_hpas="$(kubectl -n "$NAMESPACE" get hpa -o json | python3 -c \
+      'import json,sys; targets={"coordinator-deployment", "order-deployment", "inventory-deployment", "payment-deployment"}; print(sum(h.get("spec", {}).get("scaleTargetRef", {}).get("name") in targets for h in json.load(sys.stdin).get("items", [])))')"
+    [[ "$remaining_hpas" == "0" ]] && break
+    sleep 1
+  done
+  [[ "$remaining_hpas" == "0" ]] || die \
+    "An HPA still targets an application Deployment after autoscaling removal; refusing to race it while resetting Pods."
+  for deployment in coordinator-deployment order-deployment inventory-deployment payment-deployment; do
+    if kubectl -n "$NAMESPACE" get deployment "$deployment" >/dev/null 2>&1; then
+      kubectl -n "$NAMESPACE" scale "deployment/$deployment" --replicas=0
+      kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=5m
+    fi
+  done
+  for app in coordinator order inventory payment; do
+    for attempt in $(seq 1 300); do
+      remaining_pods="$(kubectl -n "$NAMESPACE" get pods -l "app=$app" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"
+      [[ -z "$remaining_pods" ]] && break
+      sleep 1
+    done
+    [[ -z "$remaining_pods" ]] || die \
+      "Existing $app Pods did not terminate within 5 minutes; refusing to mix them with this run's startup ledger."
+  done
+}
+verify_selected_app_images() {
+  local deployment service container expected actual
+  for deployment_service_container in \
+    coordinator-deployment:coordinator:coordinator \
+    order-deployment:order:order \
+    inventory-deployment:inventory:inventory \
+    payment-deployment:payment:payment; do
+    deployment="${deployment_service_container%%:*}"
+    service_container="${deployment_service_container#*:}"
+    service="${service_container%%:*}"
+    container="${service_container##*:}"
+    expected="$IMAGE_REPOSITORY_PREFIX/$service:$IMAGE_TAG"
+    actual="$(kubectl -n "$NAMESPACE" get "deployment/$deployment" -o json | python3 -c \
+      'import json,sys; d=json.load(sys.stdin); name=sys.argv[1]; print(next(c["image"] for c in d["spec"]["template"]["spec"]["containers"] if c["name"] == name))' \
+      "$container")"
+    [[ "$actual" == "$expected" ]] || die \
+      "$deployment template image is '$actual'; expected selected image '$expected'."
+  done
+}
 
 if (( ! DEPLOY_ONLY )); then
   if [[ -n "$TARGET_RPS" ]]; then
@@ -318,6 +395,11 @@ if (( DEPLOY_STACK )); then
   kubectl -n "$NAMESPACE" rollout status deployment/prometheus --timeout=5m
   kubectl -n "$NAMESPACE" rollout status deployment/kafka-exporter --timeout=5m
 
+  # Remove Pods left by the previous experiment before the observer begins.
+  # Otherwise its initial list/watch records prior Pods alongside this run's
+  # new selected-strategy Pods in pod-startup-phases.csv.
+  reset_existing_app_deployments
+
   if (( ! DEPLOY_ONLY )); then
     # Start lifecycle collection before creating application pods so the first
     # image pulls and container events are observed, not only later scale-ups.
@@ -363,27 +445,21 @@ if (( DEPLOY_STACK )); then
   fi
 
   log "Applying the four application Deployments and Services."
-  # Remove the previous KEDA HPAs during the rollout so they do not compete
-  # with the controlled one-replica baseline for this experiment.
-  kubectl -n "$NAMESPACE" delete -f "$ROOT_DIR/service-deployment/autoscaling.yml" --ignore-not-found=true --wait=true
-  kubectl apply -n "$NAMESPACE" -f "$ROOT_DIR/service-deployment/coordinator-deployment.yml"
-  kubectl apply -n "$NAMESPACE" -f "$ROOT_DIR/service-deployment/order-deployment.yml"
-  kubectl apply -n "$NAMESPACE" -f "$ROOT_DIR/service-deployment/inventory-deployment.yml"
-  kubectl apply -n "$NAMESPACE" -f "$ROOT_DIR/service-deployment/payment-deployment.yml"
+  # Render each selected strategy tag into the manifest before creating pods.
+  # The unique template annotation forces a fresh rollout when the same strategy
+  # is run again, without first creating pods from the manifest's default :latest.
+  render_app_manifest "$ROOT_DIR/service-deployment/coordinator-deployment.yml" coordinator | \
+    kubectl apply -n "$NAMESPACE" -f -
+  render_app_manifest "$ROOT_DIR/service-deployment/order-deployment.yml" order | \
+    kubectl apply -n "$NAMESPACE" -f -
+  render_app_manifest "$ROOT_DIR/service-deployment/inventory-deployment.yml" inventory | \
+    kubectl apply -n "$NAMESPACE" -f -
+  render_app_manifest "$ROOT_DIR/service-deployment/payment-deployment.yml" payment | \
+    kubectl apply -n "$NAMESPACE" -f -
 
-  # Select the strategy-tagged images built and optionally pushed by
-  # scripts/build-images.sh. Defaults preserve the existing :latest workflow.
-  kubectl -n "$NAMESPACE" set image deployment/coordinator-deployment \
-    coordinator="$IMAGE_REPOSITORY_PREFIX/coordinator:$IMAGE_TAG"
-  kubectl -n "$NAMESPACE" set image deployment/order-deployment \
-    order="$IMAGE_REPOSITORY_PREFIX/order:$IMAGE_TAG"
-  kubectl -n "$NAMESPACE" set image deployment/inventory-deployment \
-    inventory="$IMAGE_REPOSITORY_PREFIX/inventory:$IMAGE_TAG"
-  kubectl -n "$NAMESPACE" set image deployment/payment-deployment \
-    payment="$IMAGE_REPOSITORY_PREFIX/payment:$IMAGE_TAG"
-
-  # Restarting forces imagePullPolicy: Always to fetch the selected images.
-  kubectl -n "$NAMESPACE" rollout restart deployment/coordinator-deployment deployment/order-deployment deployment/inventory-deployment deployment/payment-deployment
+  verify_selected_app_images
+  kubectl -n "$NAMESPACE" scale deployment/coordinator-deployment deployment/order-deployment \
+    deployment/inventory-deployment deployment/payment-deployment --replicas=1
 
   log "Waiting for application rollouts."
   kubectl -n "$NAMESPACE" rollout status deployment/coordinator-deployment --timeout=5m
@@ -392,7 +468,6 @@ if (( DEPLOY_STACK )); then
   kubectl -n "$NAMESPACE" rollout status deployment/payment-deployment --timeout=5m
 
   log "Applying KEDA autoscaling objects."
-  kubectl -n "$NAMESPACE" scale deployment/coordinator-deployment deployment/order-deployment deployment/inventory-deployment deployment/payment-deployment --replicas=1
   kubectl apply -n "$NAMESPACE" -f "$ROOT_DIR/service-deployment/autoscaling.yml"
 
   if (( DEPLOY_ONLY )); then
@@ -402,6 +477,7 @@ else
   log "Skipping deployment as requested."
   kubectl get namespace "$NAMESPACE" >/dev/null 2>&1 || die "Namespace '$NAMESPACE' does not exist."
   kubectl -n "$NAMESPACE" get deployment coordinator-deployment order-deployment inventory-deployment payment-deployment >/dev/null
+  verify_selected_app_images
 fi
 
 log "Waiting for application Deployments to be available before measurement."

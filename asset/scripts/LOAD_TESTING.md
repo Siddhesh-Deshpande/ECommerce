@@ -20,6 +20,12 @@ The k6 script measures four distinct plateaus: a 3 RPS baseline, a sustained 15 
 
 The four plateaus run through one `ramping-arrival-rate` scenario, so they share one VU pool instead of reserving a separate pool per phase. The pool is preallocated before measurement and k6 does not add VUs mid-run. Its default is calculated as `max(50, highest phase RPS × HTTP timeout × 1.2)`: at a highest phase rate of 50 RPS and a 5-second request timeout, that is 300 VUs. This is above the 250 concurrent requests implied by 50 RPS × 5 seconds, with 20% reserve. The HTTP timeout bounds a stuck iteration; requests that exceed it fail and remain visible in latency/error metrics. The one-second rate ramps fit inside the existing 30-second inter-phase gaps; requests in those gaps are tagged and reported as transition phases separately.
 
+All four application containers currently request `250m` CPU and have a `1` CPU limit (`1000m`); memory requests and limits remain `256Mi` and `512Mi`. Keep these resource settings identical across image strategies and record them with each run. This limit was raised after the 15 RPS multi-node run showed substantial per-container CPU throttling despite low node-wide CPU usage.
+
+Before each deployed experiment, `run.sh` removes the previous KEDA objects and scales any existing application Deployments to zero. It starts the observer only after those Pods are gone, then applies the selected `IMAGE_TAG`, verifies each Deployment template uses that exact tag, and creates the one-replica baseline. This prevents previous-run Pods and the manifest's default `:latest` tag from appearing in the startup ledger. The observer image uses `imagePullPolicy: Always` so a prebuilt collector tag is resolved from its registry each run.
+
+`--skip-deploy` deliberately does not create fresh baseline Pods. It verifies that the already deployed templates use the requested `IMAGE_TAG`, but its startup ledger is suitable only for Pods created by scale-up during that run; use the normal deployment path for cold-start baseline measurements.
+
 For a diagnostic run at one target rate, set `TARGET_RPS`. This selects a single profile: warm-up, gradual ramp-up, target hold, then gradual ramp-down to zero. Phase durations are configurable in seconds. Example for one 15 RPS run:
 
 ```bash

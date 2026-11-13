@@ -17,7 +17,7 @@ spec:
       containers:
         - name: collector
           image: load-metrics-collector:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           resources:
             requests:
               cpu: 50m
