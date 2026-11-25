@@ -799,6 +799,33 @@ def summarize_pods(pods, events, app_ready_metrics, measurement_start):
                 app_phase_values[app][name].append(value)
         phase_rows.append(phase_row)
 
+    # The experiment protocol clears application images from every node before
+    # each run. Classify the first observed pull for each exact app image in a
+    # run as cold; later pulls of that unchanged image are warm, per the study's
+    # agreed operational definition. This is a run-local label, not a claim
+    # inferred from imagePullPolicy or the Pulled event text.
+    pulls_by_image = defaultdict(list)
+    for row in phase_rows:
+        row["image_pull_cache_state"] = "not_applicable"
+        if row.get("app") not in {"coordinator", "order", "inventory", "payment"}:
+            continue
+        image_ids = row.get("image_ids", "")
+        pull_started = row.get("image_pull_started_at")
+        if not image_ids or not pull_started:
+            row["image_pull_cache_state"] = "unclassified"
+            continue
+        pulls_by_image[(row["app"], image_ids)].append(row)
+    pull_cache_values = defaultdict(lambda: defaultdict(list))
+    for (app, _image_ids), rows in pulls_by_image.items():
+        rows.sort(key=lambda row: (parse_time(row["image_pull_started_at"]), row.get("pod_uid", "")))
+        for index, row in enumerate(rows):
+            state = "cold" if index == 0 else "warm"
+            row["image_pull_cache_state"] = state
+            for metric in ("image_pull_operation_seconds", "image_pull_including_wait_seconds"):
+                value = row.get(metric)
+                if value is not None:
+                    pull_cache_values[app][(state, metric)].append(value)
+
     def stats(values):
         return {
             "samples": len(values),
@@ -817,6 +844,10 @@ def summarize_pods(pods, events, app_ready_metrics, measurement_start):
             "cold_start_phase_breakdown": {
                 name: stats(values) for name, values in sorted(app_phase_values[app].items())
             },
+            "image_pull_by_cache_state": {
+                f"{state}_{metric}": stats(values)
+                for (state, metric), values in sorted(pull_cache_values[app].items())
+            },
             "observed_image_ids": sorted(app_image_ids[app]),
         }
     return {
@@ -833,7 +864,7 @@ def write_pod_phase_ledger(rows, path):
         "pod_uid", "pod_name", "app", "node_name", "image_ids", "pod_created_at",
         "image_pull_started_at", "image_pull_finished_at", "container_created_at",
         "container_started_at", "application_main_at", "spring_ready_at", "kubernetes_ready_at",
-        "image_pull_operation_seconds", "image_pull_including_wait_seconds",
+        "image_pull_operation_seconds", "image_pull_including_wait_seconds", "image_pull_cache_state",
         "pod_creation_to_image_pull_start_seconds", "image_pull_seconds",
         "image_pull_complete_to_container_created_seconds", "container_create_to_started_seconds",
         "container_start_to_application_main_seconds", "application_main_to_spring_ready_seconds",

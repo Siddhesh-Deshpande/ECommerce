@@ -1,0 +1,4 @@
+# Exclude these run folders from all cross-run analyses.
+# Format: strategy/run_id<TAB>reason
+# Keep the reason brief; no further incident detail is needed.
+graalvm/20261116T143630Z	Flawed run; excluded at researcher request.

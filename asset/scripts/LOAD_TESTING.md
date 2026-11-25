@@ -33,7 +33,7 @@ TARGET_RPS=15 WARMUP_RATE=3 WARMUP_SECONDS=120 \
 RAMP_UP_SECONDS=300 HOLD_SECONDS=300 RAMP_DOWN_SECONDS=120 ./run.sh
 ```
 
-Use a separate fresh database/Kafka state for each target-rate run. `run.sh` resets application replicas to one, but deliberately preserves PostgreSQL and Kafka persistent data. The observer records 10-second Prometheus samples for total Kafka consumer-group lag, per-partition Kafka lag, the number of lagging partitions, and the total partition count per application topic. The runner samples per-container pod CPU/memory and node CPU/memory through `kubectl top`, records PostgreSQL connections, and collects CPU throttling from Prometheus scraping kubelet cAdvisor metrics. Pod creation, container start, Spring application-ready timestamps, Kubernetes readiness, and HPA desired/current replica changes are captured separately. This single-target profile leaves the existing KEDA settings unchanged.
+Use a separate fresh database/Kafka state for each target-rate run. Before every run in the image-strategy experiment, remove all application strategy images from every worker node. The agreed cache interpretation is run-local and image-specific: the first observed pull of each service image is cold; subsequent pulls of that unchanged image in the same run are warm. Pull observations can be pooled across RPS because the target rate does not define image cache state. Preserve the node image-removal record with each run where available. `run.sh` resets application replicas to one, but deliberately preserves PostgreSQL and Kafka persistent data unless the experiment operator resets them. The observer records 10-second Prometheus samples for total Kafka consumer-group lag, per-partition Kafka lag, the number of lagging partitions, and the total partition count per application topic. The runner samples per-container pod CPU/memory and node CPU/memory through `kubectl top`, records PostgreSQL connections, and collects CPU throttling from Prometheus scraping kubelet cAdvisor metrics. Pod creation, container start, Spring application-ready timestamps, Kubernetes readiness, and HPA desired/current replica changes are captured separately. This single-target profile leaves the existing KEDA settings unchanged.
 
 The run fails k6's `dropped_iterations` threshold if it cannot start every scheduled iteration. A p95 threshold failure with zero dropped iterations means k6 delivered the configured arrivals and the service missed the 500ms latency SLO. A dropped-iteration failure means the requested load was not delivered, so compare the run's `load_generator` and per-phase arrival delivery fields before drawing service conclusions. `load-test-config.txt` records the script SHA-256 and exact VU/rate settings so a VM run can be checked against the script version.
 
@@ -150,6 +150,14 @@ Each `run.sh` result directory also contains `pod-startup-phases.csv`, one raw t
 
 See [STARTUP_METRICS.md](STARTUP_METRICS.md) for the exact source, calculation, precision, and interpretation of every startup ledger/report metric, including the distinction between image-pull operation duration and duration including waiting.
 
+To classify and summarize the agreed cold/warm image-pull observations across target rates, run:
+
+```bash
+python3 asset/scripts/summarize_image_pulls.py results > results/image-pull-summary.json
+```
+
+The first observed pull for each application image ID in each run is cold after the all-node image purge; later pulls of the same image in that run are warm. The script combines individual Pod pull-event durations for each strategy and cache state across all target rates, then reports the pooled median and percentile-bootstrap 95% interval. It also reports contributing run IDs, their target RPS values, and the Pod-event count.
+
 ## Paper result hierarchy
 
 Present results in this order: (1) SLO-violation episode duration after the load spike, (2) startup phase breakdown and fresh-Pod Ready time, (3) autoscaler reaction and Pod provisioning as explanatory results, (4) mitigation effects, and (5) a compact steady-state parity table. Keep request/workflow latency and resource use in that final supporting subsection (or appendix if space is tight). State that steady-state parity is supported only after comparing repeated runs with the same rate, configuration, and warm application state. The generated report preserves all raw per-phase values but labels the steady-state group as supporting evidence and names the primary outcomes separately.
@@ -171,3 +179,7 @@ kubectl version -o yaml > results/kubernetes-version.yaml
 kubectl get nodes -o wide > results/nodes.txt
 kubectl -n ecomm get scaledobjects,hpa,deployments -o yaml > results/scaling-configuration.yaml
 ```
+
+## Excluded runs
+
+Cross-run summaries must apply [`excluded_runs.txt`](excluded_runs.txt). GraalVM run `20261116T143630Z` is excluded from all aggregate calculations because it was identified as a flawed run. The exclusion reason is intentionally brief; the run directory has been removed from the active results set. The image-pull summary script applies this exclusion automatically.
